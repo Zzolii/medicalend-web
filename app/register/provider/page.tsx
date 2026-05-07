@@ -77,7 +77,7 @@ function specialtiesToBackendString(values: string[]) {
 }
 
 function extractApiError(e: any): string {
-  const detail = e?.response?.data?.detail;
+  const detail = e?.detail ?? e?.response?.data?.detail;
 
   if (Array.isArray(detail) && detail.length) {
     const first = detail[0];
@@ -234,7 +234,9 @@ export default function RegisterProviderPage() {
         body: payload,
       });
 
-      router.replace(`/check-email?email=${encodeURIComponent(payload.email)}`);
+      router.replace(
+        `/verify-email?email=${encodeURIComponent(payload.email)}`,
+      );
     } catch (e: any) {
       setError(extractApiError(e));
     } finally {
@@ -285,6 +287,7 @@ export default function RegisterProviderPage() {
                       : "mc-chip"
                   }
                   onClick={() => setProviderType("clinic")}
+                  disabled={busy}
                 >
                   Clinică
                 </button>
@@ -296,6 +299,7 @@ export default function RegisterProviderPage() {
                       : "mc-chip"
                   }
                   onClick={() => setProviderType("home_care")}
+                  disabled={busy}
                 >
                   Home Care
                 </button>
