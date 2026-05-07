@@ -66,6 +66,25 @@ type ProviderDashboardOut = {
   today_appointments: DashboardAppointment[];
 };
 
+type AdminStatsOut = {
+  total_users?: number;
+  total_patients?: number;
+  total_providers?: number;
+  pending_providers?: number;
+  approved_providers?: number;
+  rejected_providers?: number;
+  total_clinics?: number;
+  active_clinics?: number;
+  total_subscription_plans?: number;
+  active_subscription_plans?: number;
+  total_clinic_subscriptions?: number;
+  active_subscriptions?: number;
+  trialing_subscriptions?: number;
+  expired_subscriptions?: number;
+  canceled_subscriptions?: number;
+  subscriptions_expiring_soon?: number;
+};
+
 type EpisodeRow = {
   id: number;
   patient_id?: number;
@@ -103,12 +122,16 @@ function minutesBetween(start?: string, end?: string | null) {
   return Math.round((endMs - startMs) / 60000);
 }
 
+function safeNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
 function roleDashboardCopy(role?: string | null, clinicRole?: string | null) {
   if (role === "admin") {
     return {
-      heroTitle: "Panou operațional",
+      heroTitle: "Panou administrator",
       heroText:
-        "Monitorizează rapid activitatea curentă și intră direct în fluxurile importante ale platformei.",
+        "Monitorizează rapid platforma, aprobările furnizorilor, clinicile și abonamentele fără a încărca fluxuri dedicate clinicilor.",
       quickLabel: "Administrare platformă",
     };
   }
@@ -203,6 +226,7 @@ export default function DashboardPage() {
   const [providerData, setProviderData] = useState<ProviderDashboardOut | null>(
     null,
   );
+  const [adminStats, setAdminStats] = useState<AdminStatsOut | null>(null);
   const [patientAppointments, setPatientAppointments] = useState<
     DashboardAppointment[]
   >([]);
@@ -213,11 +237,8 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const isProviderLike = useMemo(
-    () => role === "provider" || role === "admin",
-    [role],
-  );
-
+  const isAdmin = role === "admin";
+  const isProviderLike = role === "provider";
   const isPatient = role === "patient";
 
   useEffect(() => {
@@ -228,6 +249,19 @@ export default function DashboardPage() {
 
         const token = getToken();
 
+        if (isAdmin) {
+          const stats = await apiRequest<AdminStatsOut>("/admin/stats", {
+            token,
+          }).catch(() => null);
+
+          setAdminStats(stats);
+          setProviderData(null);
+          setSubscription(null);
+          setPatientAppointments([]);
+          setPatientEpisodes([]);
+          return;
+        }
+
         if (isProviderLike) {
           const [result, subscriptionResult] = await Promise.all([
             apiRequest<ProviderDashboardOut>("/dashboard/provider", { token }),
@@ -236,6 +270,7 @@ export default function DashboardPage() {
 
           setProviderData(result);
           setSubscription(subscriptionResult);
+          setAdminStats(null);
           setPatientAppointments([]);
           setPatientEpisodes([]);
           return;
@@ -249,6 +284,7 @@ export default function DashboardPage() {
 
           setProviderData(null);
           setSubscription(null);
+          setAdminStats(null);
           setPatientAppointments(appointments ?? []);
           setPatientEpisodes(episodes ?? []);
           return;
@@ -256,6 +292,7 @@ export default function DashboardPage() {
 
         setProviderData(null);
         setSubscription(null);
+        setAdminStats(null);
         setPatientAppointments([]);
         setPatientEpisodes([]);
       } catch (err) {
@@ -270,7 +307,7 @@ export default function DashboardPage() {
     }
 
     void load();
-  }, [isPatient, isProviderLike]);
+  }, [isAdmin, isPatient, isProviderLike]);
 
   const copy = useMemo(
     () => roleDashboardCopy(role, clinicRole),
@@ -376,6 +413,170 @@ export default function DashboardPage() {
     return (
       <div className="mc-page-shell">
         <p className="mc-error-banner">{error}</p>
+      </div>
+    );
+  }
+
+  if (isAdmin) {
+    return (
+      <div className="mc-page-shell">
+        <Card
+          className="mc-stat-card"
+          style={{
+            overflow: "hidden",
+            background:
+              "linear-gradient(135deg, rgba(37,99,235,0.12) 0%, rgba(255,255,255,0.96) 58%)",
+          }}
+        >
+          <CardContent style={{ padding: 24 }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 18,
+                flexWrap: "wrap",
+              }}
+            >
+              <div style={{ maxWidth: 760 }}>
+                <div
+                  className="mc-page-badge"
+                  style={{ marginBottom: 14, width: "fit-content" }}
+                >
+                  {copy.quickLabel}
+                </div>
+
+                <h2 style={{ margin: 0, fontSize: 32, lineHeight: 1.08 }}>
+                  {copy.heroTitle}
+                </h2>
+
+                <p
+                  style={{
+                    margin: "14px 0 0",
+                    color: "var(--mc-muted)",
+                    lineHeight: 1.7,
+                    maxWidth: 720,
+                  }}
+                >
+                  {copy.heroText}
+                </p>
+
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 12,
+                    marginTop: 18,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <Link href="/admin/providers">
+                    <Button>Aprobări furnizori</Button>
+                  </Link>
+
+                  <Link href="/clinics">
+                    <Button variant="secondary">Clinici & listings</Button>
+                  </Link>
+
+                  <Link href="/admin/clinic-subscriptions">
+                    <Button variant="ghost">Abonamente</Button>
+                  </Link>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  minWidth: 280,
+                  maxWidth: 360,
+                  flex: 1,
+                  display: "grid",
+                  gap: 12,
+                }}
+              >
+                <div className="mc-list-item" style={{ background: "white" }}>
+                  <strong>Furnizori în așteptare</strong>
+                  <span>{safeNumber(adminStats?.pending_providers)}</span>
+                </div>
+
+                <div className="mc-list-item" style={{ background: "white" }}>
+                  <strong>Clinici active</strong>
+                  <span>{safeNumber(adminStats?.active_clinics)}</span>
+                </div>
+
+                <div className="mc-list-item" style={{ background: "white" }}>
+                  <strong>Abonamente active</strong>
+                  <span>{safeNumber(adminStats?.active_subscriptions)}</span>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <section className="mc-stats-grid">
+          <QuickActionCard
+            href="/admin/providers"
+            label="Furnizori total"
+            value={safeNumber(adminStats?.total_providers)}
+            note="Aprobă, respinge sau verifică furnizorii înregistrați."
+            icon={<Stethoscope size={20} />}
+          />
+
+          <QuickActionCard
+            href="/admin/providers"
+            label="În așteptare"
+            value={safeNumber(adminStats?.pending_providers)}
+            note="Cererile care necesită decizie administrativă."
+            icon={<Clock3 size={20} />}
+          />
+
+          <QuickActionCard
+            href="/clinics"
+            label="Clinici total"
+            value={safeNumber(adminStats?.total_clinics)}
+            note="Lista clinicilor și a furnizorilor vizibili în platformă."
+            icon={<Activity size={20} />}
+          />
+
+          <QuickActionCard
+            href="/patients"
+            label="Pacienți"
+            value={safeNumber(adminStats?.total_patients)}
+            note="Utilizatori de tip pacient înregistrați în platformă."
+            icon={<Users size={20} />}
+          />
+        </section>
+
+        <section className="mc-stats-grid">
+          <QuickActionCard
+            href="/admin/subscription-plans"
+            label="Planuri active"
+            value={safeNumber(adminStats?.active_subscription_plans)}
+            note="Planuri comerciale disponibile pentru clinici."
+            icon={<CreditCard size={20} />}
+          />
+
+          <QuickActionCard
+            href="/admin/clinic-subscriptions"
+            label="Abonamente"
+            value={safeNumber(adminStats?.total_clinic_subscriptions)}
+            note="Toate abonamentele asociate clinicilor."
+            icon={<ShieldCheck size={20} />}
+          />
+
+          <QuickActionCard
+            href="/admin/clinic-subscriptions"
+            label="Trial"
+            value={safeNumber(adminStats?.trialing_subscriptions)}
+            note="Clinici aflate în perioada de testare."
+            icon={<CalendarDays size={20} />}
+          />
+
+          <QuickActionCard
+            href="/admin/clinic-subscriptions"
+            label="Expirate"
+            value={safeNumber(adminStats?.expired_subscriptions)}
+            note="Clinici care necesită reactivare sau follow-up."
+            icon={<FileText size={20} />}
+          />
+        </section>
       </div>
     );
   }
