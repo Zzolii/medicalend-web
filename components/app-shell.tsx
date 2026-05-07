@@ -109,10 +109,11 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         const me = await apiRequest<MeResponse>("/users/me", { token });
         const resolvedRole = normalizeSessionRole(me?.role);
-        const resolvedClinicRole = getActiveClinicRole(
-          resolvedRole,
-          me.clinic_memberships ?? [],
-        );
+
+        const resolvedClinicRole =
+          resolvedRole === "admin"
+            ? null
+            : getActiveClinicRole(resolvedRole, me.clinic_memberships ?? []);
 
         setUser({
           email: me?.email,
