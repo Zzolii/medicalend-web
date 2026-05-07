@@ -18,34 +18,6 @@ import {
 
 type ProviderTypeValue = "clinic" | "home_care";
 
-type RegisterProviderPayload = {
-  email: string;
-  password: string;
-  name: string;
-  provider_type: ProviderTypeValue;
-  website: string | null;
-  image_url: string | null;
-  public_description: string | null;
-  specialty: string | null;
-  services_offered: string | null;
-  cui: string;
-  trade_register_number: string | null;
-  contact_person_name: string;
-  contact_email: string;
-  contact_phone: string;
-  phone: string | null;
-  address_line: string;
-  city: string;
-  county: string;
-  postal_code: string | null;
-  country: string;
-  coverage_area: string | null;
-  sanitary_authorization_number: string;
-  sanitary_authorization_expires_at: string | null;
-  healthcare_compliance_confirmed: boolean;
-  provider_agreement_accepted: boolean;
-};
-
 function cleanText(v: string) {
   return (v ?? "").replace(/\s+/g, " ").trim();
 }
@@ -76,8 +48,15 @@ function specialtiesToBackendString(values: string[]) {
   return normalizeSpecialties(values).join(", ");
 }
 
+function appendNullable(formData: FormData, key: string, value: string | null) {
+  const cleaned = cleanText(value ?? "");
+  if (cleaned) {
+    formData.append(key, cleaned);
+  }
+}
+
 function extractApiError(e: any): string {
-  const detail = e?.response?.data?.detail;
+  const detail = e?.detail ?? e?.response?.data?.detail;
 
   if (Array.isArray(detail) && detail.length) {
     const first = detail[0];
@@ -200,41 +179,62 @@ export default function RegisterProviderPage() {
 
       const normalizedSpecialty = specialtiesToBackendString(specialties);
 
-      const payload: RegisterProviderPayload = {
-        email: cleanText(email),
-        password,
-        name: cleanText(name),
-        provider_type: providerType,
-        website: cleanText(website) || null,
-        image_url: null,
-        public_description: cleanText(publicDescription) || null,
-        specialty: normalizedSpecialty ? normalizedSpecialty : null,
-        services_offered: cleanText(servicesOffered) || null,
-        cui: cleanText(cui),
-        trade_register_number: cleanText(tradeRegisterNumber) || null,
-        contact_person_name: cleanText(contactPersonName),
-        contact_email: cleanText(contactEmail),
-        contact_phone: cleanText(contactPhone),
-        phone: cleanText(phone) || null,
-        address_line: cleanText(addressLine),
-        city: cleanText(city),
-        county: cleanText(county),
-        postal_code: cleanPostal(postalCode) || null,
-        country: "RO",
-        coverage_area: cleanText(coverageArea) || null,
-        sanitary_authorization_number: cleanText(sanitaryAuthorizationNumber),
-        sanitary_authorization_expires_at:
-          cleanText(sanitaryAuthorizationExpiresAt) || null,
-        healthcare_compliance_confirmed: healthcareComplianceConfirmed,
-        provider_agreement_accepted: providerAgreementAccepted,
-      };
+      const formData = new FormData();
+
+      formData.append("email", cleanText(email));
+      formData.append("password", password);
+      formData.append("name", cleanText(name));
+      formData.append("provider_type", providerType);
+      formData.append("cui", cleanText(cui));
+      formData.append("contact_person_name", cleanText(contactPersonName));
+      formData.append("contact_email", cleanText(contactEmail));
+      formData.append("contact_phone", cleanText(contactPhone));
+      formData.append("address_line", cleanText(addressLine));
+      formData.append("city", cleanText(city));
+      formData.append("county", cleanText(county));
+      formData.append("country", "RO");
+      formData.append(
+        "sanitary_authorization_number",
+        cleanText(sanitaryAuthorizationNumber),
+      );
+      formData.append(
+        "healthcare_compliance_confirmed",
+        String(healthcareComplianceConfirmed),
+      );
+      formData.append(
+        "provider_agreement_accepted",
+        String(providerAgreementAccepted),
+      );
+
+      appendNullable(formData, "website", website);
+      appendNullable(formData, "public_description", publicDescription);
+      appendNullable(formData, "specialty", normalizedSpecialty);
+      appendNullable(formData, "services_offered", servicesOffered);
+      appendNullable(formData, "trade_register_number", tradeRegisterNumber);
+      appendNullable(formData, "phone", phone);
+
+      const cleanedPostalCode = cleanPostal(postalCode);
+      if (cleanedPostalCode) {
+        formData.append("postal_code", cleanedPostalCode);
+      }
+
+      appendNullable(formData, "coverage_area", coverageArea);
+
+      if (cleanText(sanitaryAuthorizationExpiresAt)) {
+        formData.append(
+          "sanitary_authorization_expires_at",
+          cleanText(sanitaryAuthorizationExpiresAt),
+        );
+      }
 
       await apiRequest("/auth/register-provider", {
         method: "POST",
-        body: payload,
+        body: formData,
       });
 
-      router.replace(`/check-email?email=${encodeURIComponent(payload.email)}`);
+      router.replace(
+        `/check-email?email=${encodeURIComponent(cleanText(email))}`,
+      );
     } catch (e: any) {
       setError(extractApiError(e));
     } finally {
@@ -285,6 +285,7 @@ export default function RegisterProviderPage() {
                       : "mc-chip"
                   }
                   onClick={() => setProviderType("clinic")}
+                  disabled={busy}
                 >
                   Clinică
                 </button>
@@ -296,6 +297,7 @@ export default function RegisterProviderPage() {
                       : "mc-chip"
                   }
                   onClick={() => setProviderType("home_care")}
+                  disabled={busy}
                 >
                   Home Care
                 </button>
