@@ -2,7 +2,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Edit3, RefreshCcw, Trash2, UserPlus, Users, X } from "lucide-react";
+import {
+  CalendarDays,
+  Edit3,
+  ExternalLink,
+  Link2,
+  RefreshCcw,
+  Trash2,
+  UserPlus,
+  Users,
+  X,
+} from "lucide-react";
 import { apiRequest } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 import { Input } from "@/components/ui/input";
@@ -15,6 +25,8 @@ import {
 } from "@/components/ui/card";
 
 type ClinicStaffRole = "clinic_admin" | "doctor" | "assistant" | "reception";
+type DoctorCreateMode = "existing" | "new";
+type SpecialtyCreateMode = "existing" | "new";
 
 type ClinicStaffRow = {
   user_id: number;
@@ -51,6 +63,14 @@ type ProviderMeResponse = {
   name?: string | null;
 };
 
+type ProviderSpecialtyOut = {
+  id: number;
+  provider_id: number;
+  name: string;
+  is_active: boolean;
+  created_at?: string;
+};
+
 type ProviderDoctorOut = {
   id: number;
   provider_id: number;
@@ -63,6 +83,11 @@ type ProviderDoctorOut = {
   email?: string | null;
   is_active?: boolean;
   created_at?: string;
+};
+
+type ProviderStructureOut = {
+  specialties: ProviderSpecialtyOut[];
+  doctors: ProviderDoctorOut[];
 };
 
 type ClinicStaffCreatePayload = {
@@ -79,6 +104,39 @@ type ClinicStaffUpdatePayload = {
   provider_doctor_id?: number | null;
   is_active?: boolean;
   password?: string;
+};
+
+type ProviderSpecialtyCreatePayload = {
+  name: string;
+};
+
+type ProviderDoctorCreatePayload = {
+  specialty_id: number;
+  name: string;
+  title?: string | null;
+  license_number?: string | null;
+  phone?: string | null;
+  email?: string | null;
+};
+
+type GoogleCalendarMapping = {
+  id: number;
+  clinic_id: number;
+  provider_id: number;
+  doctor_id?: number | null;
+  google_account_email?: string | null;
+  google_calendar_id: string;
+  google_calendar_name?: string | null;
+  sync_direction: string;
+  status: string;
+  is_active: boolean;
+  last_sync_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+type GoogleOAuthStartResponse = {
+  authorization_url: string;
 };
 
 const ROLE_OPTIONS: ClinicStaffRole[] = [
@@ -116,6 +174,12 @@ function formatDate(value?: string | null) {
   }
 }
 
+function cleanText(value: string) {
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function activeClinicRole(memberships?: ClinicMembership[] | null) {
   const active = (memberships ?? []).find((item) => item?.is_active);
   return active?.role ?? null;
@@ -142,6 +206,21 @@ function normalizeErrorMessage(err: unknown, fallback: string) {
   return err instanceof Error ? err.message : fallback;
 }
 
+function mappingLabel(mapping: GoogleCalendarMapping) {
+  return (
+    mapping.google_calendar_name ||
+    mapping.google_calendar_id ||
+    `Calendar #${mapping.id}`
+  );
+}
+
+function mappingForDoctor(
+  mappings: GoogleCalendarMapping[],
+  doctorId?: number | null,
+) {
+  return mappings.find((item) => item.doctor_id === doctorId) ?? null;
+}
+
 async function fetchMe(token: string | null) {
   return apiRequest<MeResponse>("/users/me", { token });
 }
@@ -150,14 +229,36 @@ async function fetchProviderMe(token: string | null) {
   return apiRequest<ProviderMeResponse>("/providers/me", { token });
 }
 
-async function fetchProviderDoctors(token: string | null, providerId: number) {
-  return apiRequest<ProviderDoctorOut[]>(`/providers/${providerId}/doctors`, {
+async function fetchProviderStructure(token: string | null) {
+  return apiRequest<ProviderStructureOut>("/providers/me/structure", {
     token,
   });
 }
 
 async function fetchClinicStaff(token: string | null) {
   return apiRequest<ClinicStaffRow[]>("/users/clinic/staff", { token });
+}
+
+async function fetchGoogleCalendarMappings(token: string | null) {
+  return apiRequest<GoogleCalendarMapping[]>(
+    "/integrations/google-calendar/mappings",
+    { token },
+  );
+}
+
+async function startGoogleCalendarOAuth(
+  token: string | null,
+  providerId: number,
+  doctorId?: number | null,
+) {
+  const query = doctorId
+    ? `provider_id=${providerId}&doctor_id=${doctorId}`
+    : `provider_id=${providerId}`;
+
+  return apiRequest<GoogleOAuthStartResponse>(
+    `/integrations/google-calendar/oauth/start?${query}`,
+    { token },
+  );
 }
 
 async function createClinicStaff(
@@ -187,6 +288,31 @@ async function deleteClinicStaff(token: string | null, userId: number) {
   return apiRequest<void>(`/users/clinic/staff/${userId}`, {
     method: "DELETE",
     token,
+  });
+}
+
+async function createProviderSpecialty(
+  token: string | null,
+  payload: ProviderSpecialtyCreatePayload,
+) {
+  return apiRequest<ProviderSpecialtyOut>(
+    "/providers/me/structure/specialties",
+    {
+      method: "POST",
+      token,
+      body: payload,
+    },
+  );
+}
+
+async function createProviderDoctor(
+  token: string | null,
+  payload: ProviderDoctorCreatePayload,
+) {
+  return apiRequest<ProviderDoctorOut>("/providers/me/structure/doctors", {
+    method: "POST",
+    token,
+    body: payload,
   });
 }
 
@@ -306,7 +432,9 @@ function Overlay({
         className="mc-card"
         style={{
           width: "100%",
-          maxWidth: 760,
+          maxWidth: 860,
+          maxHeight: "92vh",
+          overflowY: "auto",
           padding: 20,
         }}
         onClick={(e) => e.stopPropagation()}
@@ -326,7 +454,12 @@ export default function StaffPage() {
   const [clinicRole, setClinicRole] = useState<string | null>(null);
   const [items, setItems] = useState<ClinicStaffRow[]>([]);
   const [providerMe, setProviderMe] = useState<ProviderMeResponse | null>(null);
+  const [specialties, setSpecialties] = useState<ProviderSpecialtyOut[]>([]);
   const [doctors, setDoctors] = useState<ProviderDoctorOut[]>([]);
+  const [googleMappings, setGoogleMappings] = useState<GoogleCalendarMapping[]>(
+    [],
+  );
+  const [googleBusy, setGoogleBusy] = useState(false);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -338,7 +471,20 @@ export default function StaffPage() {
   const [createPassword, setCreatePassword] = useState("");
   const [createRole, setCreateRole] = useState<ClinicStaffRole>("doctor");
   const [createDoctorId, setCreateDoctorId] = useState("");
+  const [createDoctorMode, setCreateDoctorMode] =
+    useState<DoctorCreateMode>("existing");
   const [createActive, setCreateActive] = useState(true);
+
+  const [specialtyMode, setSpecialtyMode] =
+    useState<SpecialtyCreateMode>("existing");
+  const [selectedSpecialtyId, setSelectedSpecialtyId] = useState("");
+  const [newSpecialtyName, setNewSpecialtyName] = useState("");
+
+  const [doctorName, setDoctorName] = useState("");
+  const [doctorTitle, setDoctorTitle] = useState("");
+  const [doctorLicenseNumber, setDoctorLicenseNumber] = useState("");
+  const [doctorPhone, setDoctorPhone] = useState("");
+  const [doctorEmail, setDoctorEmail] = useState("");
 
   const [editingItem, setEditingItem] = useState<ClinicStaffRow | null>(null);
   const [editEmail, setEditEmail] = useState("");
@@ -361,22 +507,36 @@ export default function StaffPage() {
       const staffPromise = fetchClinicStaff(token);
 
       let provider: ProviderMeResponse | null = null;
+      let specialtyRows: ProviderSpecialtyOut[] = [];
       let doctorRows: ProviderDoctorOut[] = [];
+      let mappingRows: GoogleCalendarMapping[] = [];
 
       try {
         provider = await fetchProviderMe(token);
-        if (provider?.id) {
-          doctorRows = await fetchProviderDoctors(token, provider.id);
+        const structure = await fetchProviderStructure(token);
+        specialtyRows = structure?.specialties ?? [];
+        doctorRows = structure?.doctors ?? [];
+
+        if (role === "clinic_admin" || me.role === "admin") {
+          try {
+            mappingRows = await fetchGoogleCalendarMappings(token);
+          } catch {
+            mappingRows = [];
+          }
         }
       } catch {
         provider = null;
+        specialtyRows = [];
         doctorRows = [];
+        mappingRows = [];
       }
 
       const rows = await staffPromise;
 
       setProviderMe(provider);
+      setSpecialties(specialtyRows);
       setDoctors(doctorRows ?? []);
+      setGoogleMappings(mappingRows ?? []);
       setItems(rows ?? []);
     } catch (err) {
       setError(normalizeErrorMessage(err, "Încărcarea personalului a eșuat."));
@@ -408,14 +568,34 @@ export default function StaffPage() {
     [items],
   );
 
+  const providerLevelMapping = useMemo(
+    () => googleMappings.find((item) => item.doctor_id == null) ?? null,
+    [googleMappings],
+  );
+
+  function resetNewDoctorForm() {
+    setSpecialtyMode(specialties.length > 0 ? "existing" : "new");
+    setSelectedSpecialtyId(
+      specialties.length > 0 ? String(specialties[0].id) : "",
+    );
+    setNewSpecialtyName("");
+    setDoctorName("");
+    setDoctorTitle("");
+    setDoctorLicenseNumber("");
+    setDoctorPhone("");
+    setDoctorEmail("");
+  }
+
   function openCreate() {
     setError("");
     setSuccess("");
     setCreateEmail("");
     setCreatePassword("");
     setCreateRole("doctor");
+    setCreateDoctorMode(doctors.length > 0 ? "existing" : "new");
     setCreateDoctorId(doctors.length > 0 ? String(doctors[0].id) : "");
     setCreateActive(true);
+    resetNewDoctorForm();
     setCreateOpen(true);
   }
 
@@ -444,10 +624,16 @@ export default function StaffPage() {
     setCreateRole(nextRole);
     if (nextRole !== "doctor") {
       setCreateDoctorId("");
+      setCreateDoctorMode("existing");
       return;
     }
-    if (!createDoctorId && doctors.length > 0) {
+
+    if (doctors.length > 0) {
+      setCreateDoctorMode("existing");
       setCreateDoctorId(String(doctors[0].id));
+    } else {
+      setCreateDoctorMode("new");
+      setCreateDoctorId("");
     }
   }
 
@@ -462,10 +648,88 @@ export default function StaffPage() {
     }
   }
 
+  async function handleConnectGoogleCalendar(doctorId?: number | null) {
+    if (!providerMe?.id) {
+      setError("Providerul curent nu a putut fi identificat.");
+      return;
+    }
+
+    try {
+      setGoogleBusy(true);
+      setError("");
+      setSuccess("");
+
+      const response = await startGoogleCalendarOAuth(
+        token,
+        providerMe.id,
+        doctorId,
+      );
+
+      if (!response.authorization_url) {
+        throw new Error("Google nu a returnat URL-ul de autorizare.");
+      }
+
+      window.location.href = response.authorization_url;
+    } catch (err) {
+      setError(
+        normalizeErrorMessage(err, "Conectarea Google Calendar a eșuat."),
+      );
+    } finally {
+      setGoogleBusy(false);
+    }
+  }
+
+  async function resolveDoctorIdForCreate(): Promise<number | null> {
+    if (createRole !== "doctor") return null;
+
+    if (createDoctorMode === "existing") {
+      const existingDoctorId = Number(createDoctorId.trim());
+      if (!existingDoctorId || Number.isNaN(existingDoctorId)) {
+        throw new Error("Pentru rolul de medic trebuie selectat un medic.");
+      }
+      return existingDoctorId;
+    }
+
+    const cleanedDoctorName = cleanText(doctorName);
+    if (cleanedDoctorName.length < 2) {
+      throw new Error("Introdu numele medicului.");
+    }
+
+    let specialtyId: number | null = null;
+
+    if (specialtyMode === "existing") {
+      specialtyId = Number(selectedSpecialtyId.trim());
+      if (!specialtyId || Number.isNaN(specialtyId)) {
+        throw new Error("Selectează specialitatea medicului.");
+      }
+    } else {
+      const cleanedSpecialty = cleanText(newSpecialtyName);
+      if (cleanedSpecialty.length < 2) {
+        throw new Error("Introdu specialitatea medicului.");
+      }
+
+      const createdSpecialty = await createProviderSpecialty(token, {
+        name: cleanedSpecialty,
+      });
+      specialtyId = createdSpecialty.id;
+    }
+
+    const createdDoctor = await createProviderDoctor(token, {
+      specialty_id: specialtyId,
+      name: cleanedDoctorName,
+      title: cleanText(doctorTitle) || null,
+      license_number: cleanText(doctorLicenseNumber) || null,
+      phone: cleanText(doctorPhone) || null,
+      email: cleanText(doctorEmail) || null,
+    });
+
+    return createdDoctor.id;
+  }
+
   async function handleCreate() {
     if (submitBusy) return;
 
-    const email = createEmail.trim();
+    const email = cleanText(createEmail);
     const password = createPassword.trim();
 
     if (!email) {
@@ -478,23 +742,19 @@ export default function StaffPage() {
       return;
     }
 
-    if (createRole === "doctor" && !createDoctorId.trim()) {
-      setError("Pentru rolul de medic trebuie selectat un medic.");
-      return;
-    }
-
     try {
       setSubmitBusy(true);
       setError("");
       setSuccess("");
+
+      const providerDoctorId = await resolveDoctorIdForCreate();
 
       const payload: ClinicStaffCreatePayload = {
         email,
         password,
         clinic_role: createRole,
         is_active: createActive,
-        provider_doctor_id:
-          createRole === "doctor" ? Number(createDoctorId.trim()) : null,
+        provider_doctor_id: providerDoctorId,
       };
 
       await createClinicStaff(token, payload);
@@ -682,6 +942,159 @@ export default function StaffPage() {
 
             <Card>
               <CardHeader>
+                <CardTitle>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    <CalendarDays size={18} />
+                    Integrare Google Calendar
+                  </span>
+                </CardTitle>
+                <CardDescription>
+                  Conectează calendarul clinicii sau calendarele medicilor
+                  pentru a evita programările suprapuse.
+                </CardDescription>
+              </CardHeader>
+
+              <CardContent style={{ display: "grid", gap: 14 }}>
+                <div className="mc-muted-block">
+                  <strong style={{ color: "var(--mc-text)" }}>
+                    Calendar general furnizor
+                  </strong>
+
+                  {providerLevelMapping ? (
+                    <>
+                      <span>
+                        Conectat: {mappingLabel(providerLevelMapping)}
+                      </span>
+                      <span>
+                        Cont Google:{" "}
+                        {providerLevelMapping.google_account_email || "-"}
+                      </span>
+                      <span>Status: {providerLevelMapping.status}</span>
+                    </>
+                  ) : (
+                    <span>
+                      Nu există încă un calendar conectat la nivel de furnizor.
+                    </span>
+                  )}
+                </div>
+
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                  <ActionButton
+                    onClick={() => void handleConnectGoogleCalendar(null)}
+                    disabled={googleBusy || !providerMe?.id}
+                  >
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
+                      <Link2 size={16} />
+                      {providerLevelMapping
+                        ? "Reconectează calendar furnizor"
+                        : "Conectează calendar furnizor"}
+                    </span>
+                  </ActionButton>
+
+                  <ActionButton variant="secondary" onClick={() => void load()}>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
+                      <RefreshCcw size={16} />
+                      Reîncarcă integrarea
+                    </span>
+                  </ActionButton>
+                </div>
+
+                {doctors.length > 0 ? (
+                  <div className="mc-list">
+                    {doctors.map((doctor) => {
+                      const mapping = mappingForDoctor(
+                        googleMappings,
+                        doctor.id,
+                      );
+
+                      return (
+                        <div key={doctor.id} className="mc-list-item">
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              gap: 12,
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <div>
+                              <strong>{doctorDisplayName(doctor)}</strong>
+                              <span>
+                                {doctor.specialty_name ||
+                                  "Specialitate nespecificată"}
+                              </span>
+                            </div>
+
+                            <span
+                              className={
+                                mapping
+                                  ? "mc-pill mc-pill-success"
+                                  : "mc-pill mc-pill-warning"
+                              }
+                            >
+                              {mapping ? "Conectat" : "Neconectat"}
+                            </span>
+                          </div>
+
+                          {mapping ? (
+                            <div className="mc-muted-block">
+                              <span>Calendar: {mappingLabel(mapping)}</span>
+                              <span>
+                                Cont Google:{" "}
+                                {mapping.google_account_email || "-"}
+                              </span>
+                              <span>Status: {mapping.status}</span>
+                            </div>
+                          ) : null}
+
+                          <ActionButton
+                            variant={mapping ? "secondary" : "primary"}
+                            onClick={() =>
+                              void handleConnectGoogleCalendar(doctor.id)
+                            }
+                            disabled={googleBusy || !providerMe?.id}
+                          >
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 8,
+                              }}
+                            >
+                              <ExternalLink size={16} />
+                              {mapping
+                                ? "Reconectează calendar medic"
+                                : "Conectează calendar medic"}
+                            </span>
+                          </ActionButton>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
                 <CardTitle>Administrare personal</CardTitle>
                 <CardDescription>
                   Poți adăuga utilizatori noi, edita rolurile existente și
@@ -841,7 +1254,8 @@ export default function StaffPage() {
               <CardContent>
                 <p className="mc-empty-note">
                   Provider curent: {providerMe?.name || "Nespecificat"} • ID:{" "}
-                  {providerMe?.id ?? "-"} • Medici disponibili: {doctors.length}
+                  {providerMe?.id ?? "-"} • Specialități disponibile:{" "}
+                  {specialties.length} • Medici disponibili: {doctors.length}
                 </p>
               </CardContent>
             </Card>
@@ -861,8 +1275,9 @@ export default function StaffPage() {
             <div>
               <h3 style={{ margin: 0, fontSize: 24 }}>Utilizator nou</h3>
               <p className="mc-empty-note" style={{ marginTop: 8 }}>
-                Pentru rolul de medic, selectează medicul din structura
-                clinicii.
+                Pentru rolul de medic, poți selecta un medic existent sau poți
+                crea acum profilul medicului cu specialitate, nume, titlu, nr.
+                licență, telefon și e-mail.
               </p>
             </div>
 
@@ -883,7 +1298,7 @@ export default function StaffPage() {
           <div style={{ display: "grid", gap: 14, marginTop: 18 }}>
             <Input
               id="create-email"
-              label="Email"
+              label="Email utilizator"
               value={createEmail}
               onChange={(e) => setCreateEmail(e.target.value)}
               placeholder="utilizator@clinica.ro"
@@ -917,13 +1332,160 @@ export default function StaffPage() {
             </div>
 
             {createRole === "doctor" ? (
-              <div>
-                <label className="mc-label">Medic asociat</label>
-                <DoctorPicker
-                  doctors={doctors}
-                  value={createDoctorId}
-                  onChange={setCreateDoctorId}
-                />
+              <div className="mc-inline-form">
+                <label className="mc-label">Profil medic</label>
+
+                <div className="mc-chip-row">
+                  <button
+                    type="button"
+                    className={
+                      createDoctorMode === "existing"
+                        ? "mc-chip mc-chip-active"
+                        : "mc-chip"
+                    }
+                    onClick={() => {
+                      setCreateDoctorMode("existing");
+                      if (!createDoctorId && doctors.length > 0) {
+                        setCreateDoctorId(String(doctors[0].id));
+                      }
+                    }}
+                    disabled={doctors.length === 0}
+                  >
+                    Medic existent
+                  </button>
+
+                  <button
+                    type="button"
+                    className={
+                      createDoctorMode === "new"
+                        ? "mc-chip mc-chip-active"
+                        : "mc-chip"
+                    }
+                    onClick={() => {
+                      setCreateDoctorMode("new");
+                      setCreateDoctorId("");
+                    }}
+                  >
+                    Creează medic nou
+                  </button>
+                </div>
+
+                {createDoctorMode === "existing" ? (
+                  <div>
+                    <label className="mc-label">Medic asociat</label>
+                    <DoctorPicker
+                      doctors={doctors}
+                      value={createDoctorId}
+                      onChange={setCreateDoctorId}
+                    />
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gap: 14 }}>
+                    <div>
+                      <label className="mc-label">Specialitate</label>
+                      <div className="mc-chip-row" style={{ marginTop: 10 }}>
+                        <button
+                          type="button"
+                          className={
+                            specialtyMode === "existing"
+                              ? "mc-chip mc-chip-active"
+                              : "mc-chip"
+                          }
+                          onClick={() => setSpecialtyMode("existing")}
+                          disabled={specialties.length === 0}
+                        >
+                          Specialitate existentă
+                        </button>
+
+                        <button
+                          type="button"
+                          className={
+                            specialtyMode === "new"
+                              ? "mc-chip mc-chip-active"
+                              : "mc-chip"
+                          }
+                          onClick={() => setSpecialtyMode("new")}
+                        >
+                          Specialitate nouă
+                        </button>
+                      </div>
+                    </div>
+
+                    {specialtyMode === "existing" ? (
+                      <div>
+                        <label className="mc-label" htmlFor="specialty-id">
+                          Alege specialitatea
+                        </label>
+                        <select
+                          id="specialty-id"
+                          className="mc-input"
+                          value={selectedSpecialtyId}
+                          onChange={(e) =>
+                            setSelectedSpecialtyId(e.target.value)
+                          }
+                        >
+                          {specialties.map((specialty) => (
+                            <option key={specialty.id} value={specialty.id}>
+                              {specialty.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <Input
+                        id="new-specialty-name"
+                        label="Specialitate nouă"
+                        value={newSpecialtyName}
+                        onChange={(e) => setNewSpecialtyName(e.target.value)}
+                        placeholder="Ex: Cardiologie"
+                      />
+                    )}
+
+                    <div className="mc-form-grid-2">
+                      <Input
+                        id="doctor-name"
+                        label="Nume medic *"
+                        value={doctorName}
+                        onChange={(e) => setDoctorName(e.target.value)}
+                        placeholder="Ex: Popescu Andrei"
+                      />
+
+                      <Input
+                        id="doctor-title"
+                        label="Titlu"
+                        value={doctorTitle}
+                        onChange={(e) => setDoctorTitle(e.target.value)}
+                        placeholder="Ex: Dr., Prof. Dr."
+                      />
+
+                      <Input
+                        id="doctor-license"
+                        label="Nr. licență / parafă"
+                        value={doctorLicenseNumber}
+                        onChange={(e) => setDoctorLicenseNumber(e.target.value)}
+                        placeholder="Ex: MED12345"
+                      />
+
+                      <Input
+                        id="doctor-phone"
+                        label="Telefon"
+                        value={doctorPhone}
+                        onChange={(e) => setDoctorPhone(e.target.value)}
+                        placeholder="+40..."
+                      />
+
+                      <div className="mc-grid-span-2">
+                        <Input
+                          id="doctor-email"
+                          label="E-mail medic"
+                          value={doctorEmail}
+                          onChange={(e) => setDoctorEmail(e.target.value)}
+                          placeholder="medic@clinica.ro"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : null}
 
@@ -960,7 +1522,7 @@ export default function StaffPage() {
               }}
             >
               <ActionButton onClick={handleCreate} disabled={submitBusy}>
-                {submitBusy ? "Se salvează..." : "Creează utilizator"}
+                {submitBusy ? "Se salvează..." : "Salvează"}
               </ActionButton>
               <ActionButton
                 variant="secondary"
