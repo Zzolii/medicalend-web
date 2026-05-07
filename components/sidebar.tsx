@@ -37,6 +37,11 @@ function joinClasses(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
 }
 
+function normalizeClinicRole(value?: string | null) {
+  if (value === "receptionist") return "reception";
+  return value ?? null;
+}
+
 const patientItems: NavItem[] = [
   { href: "/dashboard", label: "Acasă", icon: Home },
   { href: "/search", label: "Căutare", icon: Search },
@@ -98,22 +103,35 @@ const adminItems: NavItem[] = [
     icon: CreditCard,
   },
   { href: "/patients", label: "Pacienți", icon: Users },
-  { href: "/profile", label: "Profil", icon: User },
 ];
 
 function itemsForRole(
   role?: SessionRole | null,
   clinicRole?: string | null,
 ): NavItem[] {
-  if (role === "patient") return patientItems;
   if (role === "admin") return adminItems;
+  if (role === "patient") return patientItems;
 
-  if (clinicRole === "clinic_admin") return clinicAdminItems;
-  if (clinicRole === "doctor") return providerDoctorItems;
-  if (clinicRole === "assistant") return assistantItems;
-  if (clinicRole === "reception") return receptionItems;
+  const normalizedClinicRole = normalizeClinicRole(clinicRole);
+
+  if (normalizedClinicRole === "clinic_admin") return clinicAdminItems;
+  if (normalizedClinicRole === "doctor") return providerDoctorItems;
+  if (normalizedClinicRole === "assistant") return assistantItems;
+  if (normalizedClinicRole === "reception") return receptionItems;
 
   return providerDoctorItems;
+}
+
+function isItemActive(pathname: string, href: string) {
+  if (href === "/admin") {
+    return pathname === "/admin";
+  }
+
+  if (href === "/dashboard") {
+    return pathname === "/dashboard";
+  }
+
+  return pathname === href || pathname.startsWith(`${href}/`);
 }
 
 export function Sidebar({ role, clinicRole }: SidebarProps) {
@@ -141,8 +159,7 @@ export function Sidebar({ role, clinicRole }: SidebarProps) {
       <nav className="mc-sidebar-nav">
         {items.map((item) => {
           const Icon = item.icon;
-          const active =
-            pathname === item.href || pathname.startsWith(`${item.href}/`);
+          const active = isItemActive(pathname, item.href);
 
           return (
             <Link
