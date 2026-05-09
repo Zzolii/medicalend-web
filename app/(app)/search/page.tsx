@@ -109,6 +109,42 @@ function filterLabel(value: SearchFilter) {
   return value;
 }
 
+function filterDescription(value: SearchFilter) {
+  if (value === "clinic") {
+    return "Caută doar clinici și centre medicale.";
+  }
+
+  if (value === "home_care") {
+    return "Caută furnizori de îngrijire la domiciliu.";
+  }
+
+  if (value === "doctor") {
+    return "Caută direct medici după nume, specialitate, oraș sau județ.";
+  }
+
+  if (value === "patient") {
+    return "Caută pacienți vizibili conform permisiunilor contului curent.";
+  }
+
+  return "Caută simultan clinici, Home Care și medici.";
+}
+
+function searchLabel(value: SearchFilter) {
+  if (value === "doctor") return "Nume medic";
+  if (value === "clinic") return "Nume clinică";
+  if (value === "home_care") return "Nume furnizor Home Care";
+  if (value === "patient") return "Nume pacient";
+  return "Nume clinică / medic / home care";
+}
+
+function searchPlaceholder(value: SearchFilter) {
+  if (value === "doctor") return "Ex: Fejer Botond";
+  if (value === "clinic") return "Ex: Medi Center";
+  if (value === "home_care") return "Ex: Home Care";
+  if (value === "patient") return "Ex: Popescu Maria";
+  return "Ex: Medi Center, Fejer Botond";
+}
+
 function normalizeText(value?: string | null) {
   return (value || "")
     .normalize("NFD")
@@ -117,6 +153,20 @@ function normalizeText(value?: string | null) {
     .replace(/[^\p{L}\p{N}\s/-]+/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function buildQuery(params: Record<string, string>) {
+  const query = new URLSearchParams();
+
+  Object.entries(params).forEach(([key, value]) => {
+    const cleaned = value.trim();
+    if (cleaned) {
+      query.set(key, cleaned);
+    }
+  });
+
+  const qs = query.toString();
+  return qs ? `?${qs}` : "";
 }
 
 function specialtyMatchesExactly(
@@ -319,6 +369,7 @@ function SpecialtyAutocomplete({
 
 export default function SearchPage() {
   const { role } = useAppUser();
+  const userRole = String(role || "");
 
   const [query, setQuery] = useState("");
   const [cityFilter, setCityFilter] = useState("");
@@ -331,11 +382,35 @@ export default function SearchPage() {
   const [clinics, setClinics] = useState<ClinicRow[]>([]);
   const [doctors, setDoctors] = useState<DoctorRow[]>([]);
   const [filter, setFilter] = useState<SearchFilter>("all");
+  const [hasSearched, setHasSearched] = useState(false);
 
   const canSearchPatients = useMemo(
-    () => role === "provider" || role === "admin",
-    [role],
+    () =>
+      [
+        "provider",
+        "admin",
+        "clinic_admin",
+        "doctor",
+        "assistant",
+        "reception",
+        "receptionist",
+      ].includes(userRole),
+    [userRole],
   );
+
+  const availableFilters = useMemo(() => {
+    if (canSearchPatients) {
+      return [
+        "all",
+        "clinic",
+        "home_care",
+        "doctor",
+        "patient",
+      ] as SearchFilter[];
+    }
+
+    return ["all", "clinic", "home_care", "doctor"] as SearchFilter[];
+  }, [canSearchPatients]);
 
   const clinicOnlyRows = useMemo(
     () => clinics.filter((item) => item.provider_type !== "home_care"),
@@ -374,7 +449,7 @@ export default function SearchPage() {
 
     const specialtyOk = !normalizedSpecialty
       ? true
-      : specialtyMatchesExactly(item.specialty_name, normalizedSpecialty);
+      : specialtyMatchesExactly(item.specialty_name, specialtyFilter);
 
     return cityOk && countyOk && specialtyOk;
   }
@@ -424,32 +499,84 @@ export default function SearchPage() {
   const totalVisibleResults =
     visibleClinics.length + visibleDoctors.length + visiblePatients.length;
 
+  function handleFilterChange(nextFilter: SearchFilter) {
+    setFilter(nextFilter);
+    setError("");
+  }
+
   async function handleSearch() {
     try {
       setLoading(true);
       setError("");
+      setHasSearched(true);
 
       const trimmed = query.trim();
       const token = getToken();
 
-      const tasks: Promise<unknown>[] = [
-        apiRequest<ClinicRow[]>(
-          `/providers/search-clinics${trimmed ? `?name=${encodeURIComponent(trimmed)}` : ""}`,
-        ).then((rows) => setClinics(rows ?? [])),
-        apiRequest<DoctorRow[]>(
-          `/providers/search-doctors${trimmed ? `?doctor_name=${encodeURIComponent(trimmed)}` : ""}`,
-        ).then((rows) => setDoctors(rows ?? [])),
-      ];
+      const shouldSearchClinics =
+        filter === "all" || filter === "clinic" || filter === "home_care";
+      const shouldSearchDoctors = filter === "all" || filter === "doctor";
+      const shouldSearchPatients =
+        canSearchPatients && (filter === "all" || filter === "patient");
 
-      if (canSearchPatients) {
+      if (!shouldSearchClinics) {
+        setClinics([]);
+      }
+
+      if (!shouldSearchDoctors) {
+        setDoctors([]);
+      }
+
+      if (!shouldSearchPatients) {
+        setPatients([]);
+      }
+
+      const tasks: Promise<unknown>[] = [];
+
+      if (shouldSearchClinics) {
+        const providerType =
+          filter === "home_care"
+            ? "home_care"
+            : filter === "clinic"
+              ? "clinic"
+              : "";
+
+        tasks.push(
+          apiRequest<ClinicRow[]>(
+            `/providers/search-clinics${buildQuery({
+              name: trimmed,
+              city: cityFilter,
+              county: countyFilter,
+              provider_type: providerType,
+            })}`,
+          ).then((rows) => setClinics(rows ?? [])),
+        );
+      }
+
+      if (shouldSearchDoctors) {
+        tasks.push(
+          apiRequest<DoctorRow[]>(
+            `/providers/search-doctors${buildQuery({
+              doctor_name: trimmed,
+              city: cityFilter,
+              county: countyFilter,
+              specialty: specialtyFilter,
+            })}`,
+          ).then((rows) => setDoctors(rows ?? [])),
+        );
+      }
+
+      if (shouldSearchPatients) {
         tasks.push(
           apiRequest<PatientRow[]>(
-            `/patients/search${trimmed ? `?name=${encodeURIComponent(trimmed)}` : ""}`,
+            `/patients/search${buildQuery({
+              name: trimmed,
+              city: cityFilter,
+              county: countyFilter,
+            })}`,
             { token },
           ).then((rows) => setPatients(rows ?? [])),
         );
-      } else {
-        setPatients([]);
       }
 
       await Promise.all(tasks);
@@ -502,10 +629,23 @@ export default function SearchPage() {
                   maxWidth: 760,
                 }}
               >
-                Ca pacient, aici este punctul principal de intrare spre
-                rezervare. Rezultatele sunt clicabile și te duc direct spre
-                profilul furnizorului și sloturile disponibile.
+                {filterDescription(filter)}
               </p>
+
+              <div className="mc-chip-row" style={{ marginTop: 14 }}>
+                {availableFilters.map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={
+                      filter === value ? "mc-chip mc-chip-active" : "mc-chip"
+                    }
+                    onClick={() => handleFilterChange(value)}
+                  >
+                    {filterLabel(value)}
+                  </button>
+                ))}
+              </div>
 
               <div
                 style={{
@@ -519,11 +659,12 @@ export default function SearchPage() {
               >
                 <Input
                   id="search"
-                  label="Nume clinică / medic / home care"
+                  label={searchLabel(filter)}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Ex: Medi Center"
+                  placeholder={searchPlaceholder(filter)}
                 />
+
                 <Input
                   id="search-city"
                   label="Oraș"
@@ -531,6 +672,7 @@ export default function SearchPage() {
                   onChange={(e) => setCityFilter(e.target.value)}
                   placeholder="Ex: Cluj"
                 />
+
                 <Input
                   id="search-county"
                   label="Județ"
@@ -538,37 +680,20 @@ export default function SearchPage() {
                   onChange={(e) => setCountyFilter(e.target.value)}
                   placeholder="Ex: Cluj"
                 />
+
                 <SpecialtyAutocomplete
                   value={specialtyFilter}
                   onChange={setSpecialtyFilter}
+                  placeholder={
+                    filter === "doctor"
+                      ? "Ex: Urologie"
+                      : "Opțional pentru medici"
+                  }
                 />
+
                 <Button onClick={handleSearch} disabled={loading}>
                   {loading ? "Se caută..." : "Caută"}
                 </Button>
-              </div>
-
-              <div className="mc-chip-row" style={{ marginTop: 14 }}>
-                {(canSearchPatients
-                  ? ([
-                      "all",
-                      "clinic",
-                      "home_care",
-                      "doctor",
-                      "patient",
-                    ] as SearchFilter[])
-                  : (["all", "clinic", "home_care", "doctor"] as SearchFilter[])
-                ).map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className={
-                      filter === value ? "mc-chip mc-chip-active" : "mc-chip"
-                    }
-                    onClick={() => setFilter(value)}
-                  >
-                    {filterLabel(value)}
-                  </button>
-                ))}
               </div>
 
               {error ? (
@@ -622,6 +747,16 @@ export default function SearchPage() {
           </div>
         </CardContent>
       </Card>
+
+      {!hasSearched ? (
+        <Card>
+          <CardContent>
+            <p className="mc-empty-note">
+              Alege tipul de căutare și apasă Caută pentru a vedea rezultatele.
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {(filter === "all" || filter === "clinic") && (
         <Card>
@@ -754,7 +889,7 @@ export default function SearchPage() {
               </span>
             </CardTitle>
             <CardDescription>
-              Deschid profilul furnizorului direct pe medicul selectat.
+              Deschide profilul furnizorului direct pe medicul selectat.
             </CardDescription>
           </CardHeader>
 
@@ -788,7 +923,8 @@ export default function SearchPage() {
                       <span>
                         <MapPin size={14} style={{ marginRight: 6 }} />
                         {item.provider_name || "fără clinică"} •{" "}
-                        {[item.city, item.county].filter(Boolean).join(", ")}
+                        {[item.city, item.county].filter(Boolean).join(", ") ||
+                          "locație indisponibilă"}
                       </span>
                       <span
                         style={{
@@ -819,7 +955,8 @@ export default function SearchPage() {
                       </span>
                       <span>
                         {item.provider_name || "fără clinică"} •{" "}
-                        {[item.city, item.county].filter(Boolean).join(", ")}
+                        {[item.city, item.county].filter(Boolean).join(", ") ||
+                          "locație indisponibilă"}
                       </span>
                     </div>
                   );

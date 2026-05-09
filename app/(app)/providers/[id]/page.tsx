@@ -127,8 +127,9 @@ function providerDisplayName(
   providerId?: number,
 ) {
   if (data?.name?.trim()) return data.name.trim();
-  if (providerId && Number.isFinite(providerId))
+  if (providerId && Number.isFinite(providerId)) {
     return `Furnizor #${providerId}`;
+  }
   return "Furnizor medical";
 }
 
@@ -214,7 +215,9 @@ export default function ProviderDetailsPage() {
   const providerId = Number(
     Array.isArray(params?.id) ? params.id[0] : params?.id,
   );
+
   const doctorIdFromQuery = searchParams.get("doctorId");
+  const parsedDoctorIdFromQuery = Number(doctorIdFromQuery);
 
   const token = getToken();
   const currentUser = getUser();
@@ -273,6 +276,21 @@ export default function ProviderDetailsPage() {
     void loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [providerId]);
+
+  useEffect(() => {
+    if (
+      !Number.isFinite(parsedDoctorIdFromQuery) ||
+      parsedDoctorIdFromQuery <= 0 ||
+      doctors.length === 0
+    ) {
+      return;
+    }
+
+    const exists = doctors.some((doctor) => doctor.id === parsedDoctorIdFromQuery);
+    if (!exists) return;
+
+    setSelectedDoctorId(parsedDoctorIdFromQuery);
+  }, [parsedDoctorIdFromQuery, doctors]);
 
   useEffect(() => {
     if (!Number.isFinite(providerId) || providerId <= 0) return;
@@ -345,18 +363,12 @@ export default function ProviderDetailsPage() {
       setProvider(providerData);
       setPatientMe(patientData);
 
-      if (doctorIdFromQuery) {
-        const parsed = Number(doctorIdFromQuery);
-        if (
-          !Number.isNaN(parsed) &&
-          doctorRows.some((item) => item.id === parsed)
-        ) {
-          setSelectedDoctorId(parsed);
-        } else if (doctorRows.length > 0) {
-          setSelectedDoctorId(doctorRows[0].id);
-        } else {
-          setSelectedDoctorId(null);
-        }
+      if (
+        Number.isFinite(parsedDoctorIdFromQuery) &&
+        parsedDoctorIdFromQuery > 0 &&
+        doctorRows.some((item) => item.id === parsedDoctorIdFromQuery)
+      ) {
+        setSelectedDoctorId(parsedDoctorIdFromQuery);
       } else if (doctorRows.length > 0) {
         setSelectedDoctorId(doctorRows[0].id);
       } else {
@@ -375,16 +387,24 @@ export default function ProviderDetailsPage() {
       setSlotsError("");
       setSelectedSlot(null);
 
+      const doctorQuery = selectedDoctorId
+        ? `&doctor_id=${selectedDoctorId}`
+        : "";
+
       const rows = await tryApi<ProviderAvailabilitySlot[]>(
         [
           () =>
             apiRequest<ProviderAvailabilitySlot[]>(
-              `/providers/${providerId}/free-slots?date=${encodeURIComponent(dateYmd)}${selectedDoctorId ? `&doctor_id=${selectedDoctorId}` : ""}`,
+              `/providers/${providerId}/free-slots?date=${encodeURIComponent(
+                dateYmd,
+              )}${doctorQuery}`,
               { token },
             ),
           () =>
             apiRequest<ProviderAvailabilitySlot[]>(
-              `/providers/${providerId}/availability?date=${encodeURIComponent(dateYmd)}${selectedDoctorId ? `&doctor_id=${selectedDoctorId}` : ""}`,
+              `/providers/${providerId}/availability?date=${encodeURIComponent(
+                dateYmd,
+              )}${doctorQuery}`,
               { token },
             ),
         ],
@@ -816,7 +836,7 @@ export default function ProviderDetailsPage() {
                   </span>
                 </CardTitle>
                 <CardDescription>
-                  Dacă nu alegi altul, este selectat primul medic disponibil.
+                  Dacă ai venit din căutarea unui medic, acesta este selectat automat.
                 </CardDescription>
               </CardHeader>
 

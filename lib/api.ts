@@ -21,11 +21,25 @@ type ApiRequestOptions = {
 };
 
 function resolveApiBaseUrl() {
-  return (
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    process.env.NEXT_PUBLIC_API_URL ||
-    "/api/v1"
-  );
+  const configured =
+    process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL;
+
+  if (configured) {
+    return configured.replace(/\/$/, "");
+  }
+
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+
+    if (
+      host === "app.medicalend.ro" ||
+      host === "medicalend-web.vercel.app"
+    ) {
+      return "https://api.medicalend.ro/api/v1";
+    }
+  }
+
+  return "/api/v1";
 }
 
 function isFormData(value: unknown): value is FormData {
@@ -117,11 +131,22 @@ export async function apiRequest<T = unknown>(
     }
   }
 
-  const response = await fetch(url, {
-    method,
-    headers,
-    body,
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(url, {
+      method,
+      headers,
+      body,
+    });
+  } catch (err) {
+    throw new ApiError(
+      "Nu se poate conecta la server. Verifică conexiunea sau configurarea API.",
+      0,
+      err instanceof Error ? err.message : err,
+      "NETWORK_ERROR",
+    );
+  }
 
   const data = await parseResponse(response);
 

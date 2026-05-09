@@ -3,7 +3,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { apiRequest } from "@/lib/api";
 import { saveSession } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,10 @@ import {
 type LoginResponse = {
   access_token: string;
   token_type: string;
+};
+
+type MessageResponse = {
+  message: string;
 };
 
 function normalizeDetail(detail: unknown): string {
@@ -45,16 +49,26 @@ function normalizeDetail(detail: unknown): string {
   return "Credentiale invalide";
 }
 
+function cleanEmail(value: string) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase();
+}
+
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
   const [busy, setBusy] = useState(false);
+  const [resendBusy, setResendBusy] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  const safeEmail = useMemo(() => cleanEmail(email), [email]);
+  const canResend =
+    safeEmail.length >= 5 && safeEmail.includes("@") && !resendBusy;
 
   async function onSubmit() {
-    const safeEmail = email.trim();
-
     if (!safeEmail || !password) {
       setError("Introdu e-mailul și parola.");
       return;
@@ -63,6 +77,7 @@ export default function LoginPage() {
     try {
       setBusy(true);
       setError("");
+      setSuccess("");
 
       const data = await apiRequest<LoginResponse>("/auth/login", {
         method: "POST",
@@ -72,10 +87,7 @@ export default function LoginPage() {
         },
       });
 
-      // 🔥 FONTOS: először mentjük
       saveSession(data.access_token);
-
-      // 🔥 majd FULL reload (nem router!)
       window.location.href = "/";
     } catch (e: any) {
       const detail =
@@ -83,6 +95,35 @@ export default function LoginPage() {
       setError(normalizeDetail(detail));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function onResendVerification() {
+    if (!canResend) {
+      setError("Introdu adresa de e-mail înainte de retrimitere.");
+      return;
+    }
+
+    try {
+      setResendBusy(true);
+      setError("");
+      setSuccess("");
+
+      const res = await apiRequest<MessageResponse>(
+        "/auth/resend-verification",
+        {
+          method: "POST",
+          body: { email: safeEmail },
+        },
+      );
+
+      setSuccess(res.message || "E-mailul de confirmare a fost retrimis.");
+    } catch (e: any) {
+      const detail =
+        e?.response?.data?.detail ?? e?.message ?? "Retrimiterea a eșuat.";
+      setError(normalizeDetail(detail));
+    } finally {
+      setResendBusy(false);
     }
   }
 
@@ -102,7 +143,7 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="email@exemplu.ro"
-              disabled={busy}
+              disabled={busy || resendBusy}
             />
 
             <Input
@@ -112,13 +153,40 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
-              disabled={busy}
+              disabled={busy || resendBusy}
             />
 
             {error ? <p className="mc-error-banner">{error}</p> : null}
 
-            <Button onClick={onSubmit} disabled={busy}>
+            {success ? (
+              <p
+                style={{
+                  margin: 0,
+                  padding: "12px 14px",
+                  borderRadius: 14,
+                  border: "1px solid #bbf7d0",
+                  background: "#f0fdf4",
+                  color: "#166534",
+                  lineHeight: 1.55,
+                  fontSize: 14,
+                }}
+              >
+                {success}
+              </p>
+            ) : null}
+
+            <Button onClick={onSubmit} disabled={busy || resendBusy}>
               {busy ? "Se autentifică..." : "Autentificare"}
+            </Button>
+
+            <Button
+              variant="secondary"
+              onClick={onResendVerification}
+              disabled={!canResend || busy}
+            >
+              {resendBusy
+                ? "Se retrimite..."
+                : "Retrimite e-mailul de confirmare"}
             </Button>
 
             <div className="mc-auth-links">
@@ -127,10 +195,10 @@ export default function LoginPage() {
               </Link>
 
               <Link
-                href={`/check-email${email.trim() ? `?email=${encodeURIComponent(email.trim())}` : ""}`}
+                href={`/check-email${safeEmail ? `?email=${encodeURIComponent(safeEmail)}` : ""}`}
                 className="mc-link-button"
               >
-                Retrimite e-mailul de confirmare
+                Deschide pagina de confirmare
               </Link>
             </div>
 

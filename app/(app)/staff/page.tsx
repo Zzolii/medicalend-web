@@ -348,7 +348,7 @@ function ActionButton({
       onClick={onClick}
       disabled={disabled}
       style={{
-        height: 44,
+        minHeight: 44,
         padding: "0 16px",
         borderRadius: 14,
         border,
@@ -357,7 +357,13 @@ function ActionButton({
         fontWeight: 800,
         cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.7 : 1,
-        width: fullWidth ? "100%" : "auto",
+        width: fullWidth ? "100%" : "fit-content",
+        maxWidth: fullWidth ? "100%" : "100%",
+        alignSelf: fullWidth ? "stretch" : "flex-start",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        lineHeight: 1.2,
       }}
     >
       {children}
@@ -1065,26 +1071,33 @@ export default function StaffPage() {
                             </div>
                           ) : null}
 
-                          <ActionButton
-                            variant={mapping ? "secondary" : "primary"}
-                            onClick={() =>
-                              void handleConnectGoogleCalendar(doctor.id)
-                            }
-                            disabled={googleBusy || !providerMe?.id}
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "flex-start",
+                            }}
                           >
-                            <span
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: 8,
-                              }}
+                            <ActionButton
+                              variant={mapping ? "secondary" : "primary"}
+                              onClick={() =>
+                                void handleConnectGoogleCalendar(doctor.id)
+                              }
+                              disabled={googleBusy || !providerMe?.id}
                             >
-                              <ExternalLink size={16} />
-                              {mapping
-                                ? "Reconectează calendar medic"
-                                : "Conectează calendar medic"}
-                            </span>
-                          </ActionButton>
+                              <span
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 8,
+                                }}
+                              >
+                                <ExternalLink size={16} />
+                                {mapping
+                                  ? "Reconectează calendar medic"
+                                  : "Conectează calendar medic"}
+                              </span>
+                            </ActionButton>
+                          </div>
                         </div>
                       );
                     })}
