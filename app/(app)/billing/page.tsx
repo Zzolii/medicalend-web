@@ -35,7 +35,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-const DEFAULT_MONTHLY_PLAN_ID = 4;
+const DEFAULT_MONTHLY_PLAN_ID = 2;
 
 export default function BillingPage() {
   const searchParams = useSearchParams();
