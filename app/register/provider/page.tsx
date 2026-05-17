@@ -234,9 +234,7 @@ export default function RegisterProviderPage() {
         body: payload,
       });
 
-      router.replace(
-        `/verify-email?email=${encodeURIComponent(payload.email)}`,
-      );
+      router.replace(`/login?registered=pending`);
     } catch (e: any) {
       setError(extractApiError(e));
     } finally {
