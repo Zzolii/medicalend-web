@@ -9,6 +9,7 @@ import {
   ArrowLeft,
   CalendarDays,
   FileText,
+  GitBranch,
   MapPin,
   Paperclip,
   Upload,
@@ -44,27 +45,43 @@ type PatientDetails = {
   fhir_id?: string | null;
 };
 
-type EpisodeRow = {
+type JourneyAppointment = {
   id: number;
-  patient_id?: number;
-  owner_provider_id?: number;
-  title?: string;
+  provider_id?: number | null;
+  provider_name?: string | null;
+  doctor_id?: number | null;
+  doctor_name?: string | null;
+  start_time?: string;
+  end_time?: string | null;
+  status?: string;
+  notes?: string | null;
+};
+
+type JourneyReferral = {
+  id: number;
+  from_provider_id: number;
+  from_provider_name?: string | null;
+  to_provider_id: number;
+  to_provider_name?: string | null;
+  reason?: string | null;
   status?: string;
   created_at?: string;
 };
 
-type TimelineAppointment = {
+type JourneyEpisode = {
   id: number;
-  start_time?: string;
-  end_time?: string | null;
+  title?: string;
   status?: string;
-  patient_id?: number | null;
-  provider_id?: number | null;
-  doctor_id?: number | null;
-  notes?: string | null;
-  patient_name?: string | null;
-  provider_name?: string | null;
-  doctor_name?: string | null;
+  owner_provider_id: number;
+  owner_provider_name?: string | null;
+  created_at?: string;
+  appointments: JourneyAppointment[];
+  referrals: JourneyReferral[];
+};
+
+type PatientJourneyResponse = {
+  patient_id: number;
+  episodes: JourneyEpisode[];
 };
 
 type TimelineDocument = {
@@ -77,17 +94,18 @@ type TimelineDocument = {
 };
 
 type EpisodeTimeline = {
-  episode: EpisodeRow;
-  appointments: TimelineAppointment[];
-  notes: unknown[];
-  tasks: unknown[];
-  referrals: unknown[];
-  documents: TimelineDocument[];
+  episode?: unknown;
+  appointments?: unknown[];
+  notes?: unknown[];
+  tasks?: unknown[];
+  referrals?: unknown[];
+  documents?: TimelineDocument[];
 };
 
 type EpisodeGroup = {
-  episode: EpisodeRow;
-  appointments: TimelineAppointment[];
+  episode: JourneyEpisode;
+  appointments: JourneyAppointment[];
+  referrals: JourneyReferral[];
   episodeDocuments: TimelineDocument[];
   documentsByAppointment: Record<number, TimelineDocument[]>;
 };
@@ -142,15 +160,6 @@ function statusClass(value?: string | null) {
     return "mc-pill mc-pill-warning";
   }
 
-  if (
-    value === "closed" ||
-    value === "archived" ||
-    value === "rejected" ||
-    value === "canceled"
-  ) {
-    return "mc-pill mc-pill-neutral";
-  }
-
   return "mc-pill mc-pill-neutral";
 }
 
@@ -166,12 +175,12 @@ function sortDesc<
   });
 }
 
-function appointmentTitle(item: TimelineAppointment) {
+function appointmentTitle(item: JourneyAppointment) {
   if (item.notes?.trim()) return item.notes.trim();
   return "Consultație medicală";
 }
 
-function appointmentSubtitle(item: TimelineAppointment) {
+function appointmentSubtitle(item: JourneyAppointment) {
   if (item.doctor_name?.trim() && item.provider_name?.trim()) {
     return `${item.doctor_name.trim()} • ${item.provider_name.trim()}`;
   }
@@ -180,6 +189,15 @@ function appointmentSubtitle(item: TimelineAppointment) {
   if (item.provider_name?.trim()) return item.provider_name.trim();
 
   return "Clinică / specialist";
+}
+
+function referralTitle(item: JourneyReferral) {
+  const fromName =
+    item.from_provider_name?.trim() || `Furnizor #${item.from_provider_id}`;
+  const toName =
+    item.to_provider_name?.trim() || `Furnizor #${item.to_provider_id}`;
+
+  return `${fromName} → ${toName}`;
 }
 
 function documentTitle(item: TimelineDocument) {
@@ -240,8 +258,10 @@ export default function PatientJourneyPage() {
   const { role, clinicRole } = useAppUser();
 
   const [patient, setPatient] = useState<PatientDetails | null>(null);
-  const [episodes, setEpisodes] = useState<EpisodeRow[]>([]);
-  const [timelines, setTimelines] = useState<EpisodeTimeline[]>([]);
+  const [journey, setJourney] = useState<PatientJourneyResponse | null>(null);
+  const [documentsByEpisode, setDocumentsByEpisode] = useState<
+    Record<number, TimelineDocument[]>
+  >({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -257,55 +277,47 @@ export default function PatientJourneyPage() {
 
   const canUploadDocuments =
     role === "patient" ||
-    role === "admin" ||
     role === "provider" ||
     clinicRole === "doctor" ||
     clinicRole === "assistant" ||
     clinicRole === "clinic_admin";
 
   const loadData = async (currentPatientId: string) => {
-    const [patientData, allEpisodes] = await Promise.all([
+    const [patientData, journeyData] = await Promise.all([
       apiRequest<PatientDetails>(`/patients/${currentPatientId}`, { token }),
-      apiRequest<EpisodeRow[]>("/care-episodes/", { token }),
+      apiRequest<PatientJourneyResponse>(
+        `/patients/${currentPatientId}/journey`,
+        {
+          token,
+        },
+      ),
     ]);
 
-    const patientEpisodes = (allEpisodes ?? []).filter(
-      (item) => String(item.patient_id ?? "") === String(currentPatientId),
-    );
-
-    const episodeTimelines = await Promise.all(
-      patientEpisodes.map(async (episode) => {
+    const episodeDocumentsPairs = await Promise.all(
+      (journeyData.episodes ?? []).map(async (episode) => {
         try {
           const timeline = await apiRequest<EpisodeTimeline>(
             `/care-episodes/${episode.id}/timeline`,
             { token },
           );
 
-          return {
-            episode,
-            appointments: timeline.appointments ?? [],
-            notes: timeline.notes ?? [],
-            tasks: timeline.tasks ?? [],
-            referrals: timeline.referrals ?? [],
-            documents: timeline.documents ?? [],
-          } satisfies EpisodeTimeline;
+          return [episode.id, timeline.documents ?? []] as const;
         } catch {
-          return {
-            episode,
-            appointments: [],
-            notes: [],
-            tasks: [],
-            referrals: [],
-            documents: [],
-          } satisfies EpisodeTimeline;
+          return [episode.id, [] as TimelineDocument[]] as const;
         }
       }),
     );
 
+    const nextDocumentsByEpisode: Record<number, TimelineDocument[]> = {};
+
+    for (const [episodeId, documents] of episodeDocumentsPairs) {
+      nextDocumentsByEpisode[episodeId] = documents;
+    }
+
     return {
       patientData,
-      patientEpisodes,
-      episodeTimelines,
+      journeyData,
+      nextDocumentsByEpisode,
     };
   };
 
@@ -335,8 +347,8 @@ export default function PatientJourneyPage() {
         if (!mounted) return;
 
         setPatient(data.patientData);
-        setEpisodes(data.patientEpisodes);
-        setTimelines(data.episodeTimelines);
+        setJourney(data.journeyData);
+        setDocumentsByEpisode(data.nextDocumentsByEpisode);
       } catch (err) {
         if (!mounted) return;
 
@@ -358,6 +370,8 @@ export default function PatientJourneyPage() {
       mounted = false;
     };
   }, [patientId, token]);
+
+  const episodes = useMemo(() => journey?.episodes ?? [], [journey?.episodes]);
 
   const fullName = useMemo(() => {
     return [patient?.first_name, patient?.last_name]
@@ -385,11 +399,12 @@ export default function PatientJourneyPage() {
   ]);
 
   const groupedJourney = useMemo<EpisodeGroup[]>(() => {
-    const groups = timelines.map((entry) => {
+    const groups = episodes.map((episode) => {
+      const documents = documentsByEpisode[episode.id] ?? [];
       const documentsByAppointment: Record<number, TimelineDocument[]> = {};
       const episodeDocuments: TimelineDocument[] = [];
 
-      for (const document of entry.documents) {
+      for (const document of documents) {
         if (typeof document.appointment_id === "number") {
           if (!documentsByAppointment[document.appointment_id]) {
             documentsByAppointment[document.appointment_id] = [];
@@ -401,8 +416,9 @@ export default function PatientJourneyPage() {
       }
 
       return {
-        episode: entry.episode,
-        appointments: sortDesc(entry.appointments),
+        episode,
+        appointments: sortDesc(episode.appointments ?? []),
+        referrals: sortDesc(episode.referrals ?? []),
         episodeDocuments: sortDesc(episodeDocuments),
         documentsByAppointment,
       };
@@ -417,21 +433,33 @@ export default function PatientJourneyPage() {
         : 0;
       return bTime - aTime;
     });
-  }, [timelines]);
+  }, [documentsByEpisode, episodes]);
 
   const totalDocuments = useMemo(
     () =>
-      timelines.reduce((sum, group) => sum + (group.documents?.length ?? 0), 0),
-    [timelines],
+      Object.values(documentsByEpisode).reduce(
+        (sum, docs) => sum + docs.length,
+        0,
+      ),
+    [documentsByEpisode],
   );
 
   const totalAppointments = useMemo(
     () =>
-      timelines.reduce(
-        (sum, group) => sum + (group.appointments?.length ?? 0),
+      episodes.reduce(
+        (sum, episode) => sum + (episode.appointments?.length ?? 0),
         0,
       ),
-    [timelines],
+    [episodes],
+  );
+
+  const totalReferrals = useMemo(
+    () =>
+      episodes.reduce(
+        (sum, episode) => sum + (episode.referrals?.length ?? 0),
+        0,
+      ),
+    [episodes],
   );
 
   async function handleUploadDocument(episodeId: number) {
@@ -462,8 +490,8 @@ export default function PatientJourneyPage() {
 
       const data = await loadData(patientId);
       setPatient(data.patientData);
-      setEpisodes(data.patientEpisodes);
-      setTimelines(data.episodeTimelines);
+      setJourney(data.journeyData);
+      setDocumentsByEpisode(data.nextDocumentsByEpisode);
     } catch (err) {
       setError(
         err instanceof Error
@@ -515,8 +543,8 @@ export default function PatientJourneyPage() {
                 className="mc-page-badge"
                 style={{ marginBottom: 14, width: "fit-content" }}
               >
-                <Activity size={16} style={{ marginRight: 8 }} />
-                Journey
+                <GitBranch size={16} style={{ marginRight: 8 }} />
+                Journey longitudinal
               </div>
 
               <h2 style={{ margin: 0, fontSize: 32, lineHeight: 1.08 }}>
@@ -531,9 +559,9 @@ export default function PatientJourneyPage() {
                   maxWidth: 760,
                 }}
               >
-                Episoadele, programările și fișierele PDF sunt afișate într-o
-                structură vizuală ușor de urmărit. Documentele sunt păstrate ca
-                fișiere atașate, fără interpretare automată.
+                Episoadele, programările, trimiterile și documentele atașate
+                sunt afișate într-o structură cronologică. Datele medicale sunt
+                afișate conform rolului și relației existente cu pacientul.
               </p>
 
               <div
@@ -585,6 +613,7 @@ export default function PatientJourneyPage() {
       {loading ? (
         <p className="mc-empty-note">Se încarcă Journey-ul...</p>
       ) : null}
+
       {error ? <p className="mc-error-banner">{error}</p> : null}
 
       {!loading && !error && patient ? (
@@ -600,22 +629,7 @@ export default function PatientJourneyPage() {
                   <Activity size={20} />
                 </div>
               </div>
-              <p className="mc-stat-note">Grupurile principale din Journey.</p>
-            </Card>
-
-            <Card className="mc-stat-card">
-              <div className="mc-stat-top">
-                <div>
-                  <p className="mc-stat-label">PDF-uri</p>
-                  <p className="mc-stat-value">{totalDocuments}</p>
-                </div>
-                <div className="mc-icon-badge">
-                  <Paperclip size={20} />
-                </div>
-              </div>
-              <p className="mc-stat-note">
-                Fișiere atașate episoadelor sau programărilor.
-              </p>
+              <p className="mc-stat-note">Istoricul medical disponibil.</p>
             </Card>
 
             <Card className="mc-stat-card">
@@ -634,16 +648,27 @@ export default function PatientJourneyPage() {
             <Card className="mc-stat-card">
               <div className="mc-stat-top">
                 <div>
-                  <p className="mc-stat-label">Pacient</p>
-                  <p className="mc-stat-value">1</p>
+                  <p className="mc-stat-label">Trimiteri</p>
+                  <p className="mc-stat-value">{totalReferrals}</p>
                 </div>
                 <div className="mc-icon-badge">
-                  <User size={20} />
+                  <GitBranch size={20} />
                 </div>
               </div>
-              <p className="mc-stat-note">
-                Journey-ul este deschis pentru pacientul selectat.
-              </p>
+              <p className="mc-stat-note">Relații între furnizori medicali.</p>
+            </Card>
+
+            <Card className="mc-stat-card">
+              <div className="mc-stat-top">
+                <div>
+                  <p className="mc-stat-label">PDF-uri</p>
+                  <p className="mc-stat-value">{totalDocuments}</p>
+                </div>
+                <div className="mc-icon-badge">
+                  <Paperclip size={20} />
+                </div>
+              </div>
+              <p className="mc-stat-note">Fișiere atașate episoadelor.</p>
             </Card>
           </section>
 
@@ -702,7 +727,7 @@ export default function PatientJourneyPage() {
               <CardHeader>
                 <CardTitle>Structură Journey</CardTitle>
                 <CardDescription>
-                  Organizare vizuală pe episoade, programări și PDF-uri.
+                  Organizare pe episoade, programări, trimiteri și PDF-uri.
                 </CardDescription>
               </CardHeader>
 
@@ -719,7 +744,7 @@ export default function PatientJourneyPage() {
                     <div className="mc-status-text">
                       <strong>Programări</strong>
                       <span>
-                        Scopul programării este afișat din câmpul notes.
+                        Programările sunt afișate direct din endpointul Journey.
                       </span>
                     </div>
                   </div>
@@ -728,8 +753,8 @@ export default function PatientJourneyPage() {
                     <div className="mc-status-text">
                       <strong>Documente PDF</strong>
                       <span>
-                        Fișierele sunt afișate ca atașamente, fără structurare
-                        sau interpretare automată.
+                        Fișierele sunt încărcate separat din timeline-ul
+                        episodului.
                       </span>
                     </div>
                   </div>
@@ -774,8 +799,9 @@ export default function PatientJourneyPage() {
                       </CardTitle>
 
                       <CardDescription>
-                        Creat la {formatDateTime(episode.created_at)} •
-                        provider: {episode.owner_provider_id ?? "—"}
+                        Creat la {formatDateTime(episode.created_at)} •{" "}
+                        {episode.owner_provider_name ||
+                          `Furnizor #${episode.owner_provider_id}`}
                       </CardDescription>
                     </CardHeader>
 
@@ -983,6 +1009,56 @@ export default function PatientJourneyPage() {
                                   </div>
                                 );
                               })}
+                            </div>
+                          )}
+                        </div>
+
+                        <div>
+                          <h3
+                            style={{
+                              margin: "8px 0 10px",
+                              fontSize: 18,
+                              lineHeight: 1.2,
+                            }}
+                          >
+                            Trimiteri
+                          </h3>
+
+                          {group.referrals.length === 0 ? (
+                            <p className="mc-empty-note">
+                              Nu există trimiteri legate de acest episod.
+                            </p>
+                          ) : (
+                            <div className="mc-list">
+                              {group.referrals.map((referral) => (
+                                <div key={referral.id} className="mc-list-item">
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      justifyContent: "space-between",
+                                      gap: 12,
+                                      flexWrap: "wrap",
+                                    }}
+                                  >
+                                    <div>
+                                      <strong>{referralTitle(referral)}</strong>
+                                      <span>
+                                        {referral.reason ||
+                                          "Fără motiv specificat"}
+                                      </span>
+                                      <span>
+                                        {formatDateTime(referral.created_at)}
+                                      </span>
+                                    </div>
+
+                                    <span
+                                      className={statusClass(referral.status)}
+                                    >
+                                      {statusLabel(referral.status)}
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
                             </div>
                           )}
                         </div>
