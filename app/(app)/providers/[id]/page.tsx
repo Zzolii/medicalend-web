@@ -85,35 +85,41 @@ function toYmd(date: Date) {
 
 function formatDateTime(value?: string | null) {
   if (!value) return "Nespecificat";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString("ro-RO", {
-    dateStyle: "short",
-    timeStyle: "short",
-  });
+
+  const match = value
+    .trim()
+    .match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})/);
+
+  if (!match) return value;
+
+  const [, yyyy, mm, dd, hh, mi] = match;
+  return `${dd}.${mm}.${yyyy}, ${hh}:${mi}`;
 }
 
 function formatWallClockTime(value?: string | null) {
   if (!value) return "—";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleTimeString("ro-RO", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+
+  const match = value
+    .trim()
+    .match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})/);
+
+  if (!match) return value;
+
+  const [, , , , hh, mi] = match;
+  return `${hh}:${mi}`;
 }
 
 function toBackendNaiveIso(value?: string | null) {
   if (!value) return value;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  const yyyy = parsed.getFullYear();
-  const mm = String(parsed.getMonth() + 1).padStart(2, "0");
-  const dd = String(parsed.getDate()).padStart(2, "0");
-  const hh = String(parsed.getHours()).padStart(2, "0");
-  const mi = String(parsed.getMinutes()).padStart(2, "0");
-  const ss = String(parsed.getSeconds()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}`;
+
+  const match = value
+    .trim()
+    .match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2}))?/);
+
+  if (!match) return value;
+
+  const [, yyyy, mm, dd, hh, mi, ss] = match;
+  return `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss || "00"}`;
 }
 
 function providerTypeLabel(value?: string | null) {
@@ -286,7 +292,9 @@ export default function ProviderDetailsPage() {
       return;
     }
 
-    const exists = doctors.some((doctor) => doctor.id === parsedDoctorIdFromQuery);
+    const exists = doctors.some(
+      (doctor) => doctor.id === parsedDoctorIdFromQuery,
+    );
     if (!exists) return;
 
     setSelectedDoctorId(parsedDoctorIdFromQuery);
@@ -836,7 +844,8 @@ export default function ProviderDetailsPage() {
                   </span>
                 </CardTitle>
                 <CardDescription>
-                  Dacă ai venit din căutarea unui medic, acesta este selectat automat.
+                  Dacă ai venit din căutarea unui medic, acesta este selectat
+                  automat.
                 </CardDescription>
               </CardHeader>
 
