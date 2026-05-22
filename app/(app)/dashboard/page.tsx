@@ -2,7 +2,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Activity,
   ArrowRight,
@@ -103,10 +103,24 @@ function getStatusClass(status?: string) {
   ) {
     return "mc-pill mc-pill-success";
   }
+
   if (status === "pending" || status === "in_progress") {
     return "mc-pill mc-pill-warning";
   }
+
   return "mc-pill mc-pill-neutral";
+}
+
+function statusLabel(status?: string | null) {
+  if (!status) return "Necunoscut";
+  if (status === "scheduled") return "Programată";
+  if (status === "in_progress") return "În desfășurare";
+  if (status === "completed") return "Finalizată";
+  if (status === "canceled") return "Anulată";
+  if (status === "pending") return "În așteptare";
+  if (status === "open") return "Deschis";
+  if (status === "active") return "Activ";
+  return status;
 }
 
 function minutesBetween(start?: string, end?: string | null) {
@@ -124,6 +138,38 @@ function minutesBetween(start?: string, end?: string | null) {
 
 function safeNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function appointmentTitle(item: DashboardAppointment) {
+  if (item.notes?.trim()) return item.notes.trim();
+  return "Consultație medicală";
+}
+
+function appointmentSubtitle(item: DashboardAppointment) {
+  const doctor = item.doctor_name?.trim();
+  const provider = item.provider_name?.trim();
+
+  if (doctor && provider) return `${doctor} • ${provider}`;
+  if (doctor) return doctor;
+  if (provider) return provider;
+
+  return "Clinică / specialist";
+}
+
+function appointmentTimeRange(item: DashboardAppointment) {
+  if (!item.start_time) return "Oră nespecificată";
+
+  const start = formatDateTime(item.start_time);
+
+  if (!item.end_time) return start;
+
+  const parsedEnd = new Date(item.end_time);
+  if (Number.isNaN(parsedEnd.getTime())) return start;
+
+  return `${start} - ${parsedEnd.toLocaleTimeString("ro-RO", {
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`;
 }
 
 function roleDashboardCopy(role?: string | null, clinicRole?: string | null) {
@@ -194,7 +240,7 @@ type QuickActionCardProps = {
   label: string;
   value: string | number;
   note: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
 };
 
 function QuickActionCard({
@@ -220,12 +266,120 @@ function QuickActionCard({
   );
 }
 
+function TodayAppointmentsCard({
+  appointments,
+  clinicRole,
+}: {
+  appointments: DashboardAppointment[];
+  clinicRole?: string | null;
+}) {
+  const title =
+    clinicRole === "doctor"
+      ? "Programările mele de astăzi"
+      : "Programările de astăzi";
+
+  const description =
+    clinicRole === "reception"
+      ? "Lista operațională a pacienților programați astăzi în clinică."
+      : clinicRole === "doctor"
+        ? "Programările atribuite medicului conectat pentru ziua curentă."
+        : "Lista programărilor vizibile pentru rolul tău în ziua curentă.";
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>
+          <span
+            style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+          >
+            <CalendarDays size={18} />
+            {title}
+          </span>
+        </CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+
+      <CardContent>
+        {appointments.length === 0 ? (
+          <p className="mc-empty-note">
+            Nu există programări vizibile pentru astăzi.
+          </p>
+        ) : (
+          <div className="mc-list">
+            {appointments.map((appointment) => (
+              <div key={appointment.id} className="mc-list-item">
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div>
+                    <strong>
+                      {appointment.patient_name ||
+                        `Pacient #${appointment.patient_id ?? "-"}`}
+                    </strong>
+
+                    <span>{appointmentTitle(appointment)}</span>
+                    <span>{appointmentSubtitle(appointment)}</span>
+                    <span>{appointmentTimeRange(appointment)}</span>
+                  </div>
+
+                  <span className={getStatusClass(appointment.status)}>
+                    {statusLabel(appointment.status)}
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 10,
+                    flexWrap: "wrap",
+                    marginTop: 12,
+                  }}
+                >
+                  <Link href={`/appointments/${appointment.id}`}>
+                    <Button variant="secondary">Deschide programarea</Button>
+                  </Link>
+
+                  {appointment.patient_id ? (
+                    <Link href={`/patients/${appointment.patient_id}`}>
+                      <Button variant="ghost">Profil pacient</Button>
+                    </Link>
+                  ) : null}
+
+                  {appointment.patient_id ? (
+                    <Link href={`/patients/${appointment.patient_id}/journey`}>
+                      <Button variant="ghost">Journey</Button>
+                    </Link>
+                  ) : null}
+
+                  {appointment.episode_id ? (
+                    <Link href={`/episodes/${appointment.episode_id}`}>
+                      <Button variant="ghost">Episod</Button>
+                    </Link>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function DashboardPage() {
   const { role, clinicRole } = useAppUser();
 
   const [providerData, setProviderData] = useState<ProviderDashboardOut | null>(
     null,
   );
+  const [todayAppointments, setTodayAppointments] = useState<
+    DashboardAppointment[]
+  >([]);
   const [adminStats, setAdminStats] = useState<AdminStatsOut | null>(null);
   const [patientAppointments, setPatientAppointments] = useState<
     DashboardAppointment[]
@@ -256,6 +410,7 @@ export default function DashboardPage() {
 
           setAdminStats(stats);
           setProviderData(null);
+          setTodayAppointments([]);
           setSubscription(null);
           setPatientAppointments([]);
           setPatientEpisodes([]);
@@ -263,12 +418,16 @@ export default function DashboardPage() {
         }
 
         if (isProviderLike) {
-          const [result, subscriptionResult] = await Promise.all([
+          const [result, todayResult, subscriptionResult] = await Promise.all([
             apiRequest<ProviderDashboardOut>("/dashboard/provider", { token }),
+            apiRequest<DashboardAppointment[]>("/appointments/today", {
+              token,
+            }).catch(() => []),
             fetchMyClinicSubscription(token).catch(() => null),
           ]);
 
           setProviderData(result);
+          setTodayAppointments(todayResult ?? []);
           setSubscription(subscriptionResult);
           setAdminStats(null);
           setPatientAppointments([]);
@@ -283,6 +442,7 @@ export default function DashboardPage() {
           ]);
 
           setProviderData(null);
+          setTodayAppointments([]);
           setSubscription(null);
           setAdminStats(null);
           setPatientAppointments(appointments ?? []);
@@ -291,6 +451,7 @@ export default function DashboardPage() {
         }
 
         setProviderData(null);
+        setTodayAppointments([]);
         setSubscription(null);
         setAdminStats(null);
         setPatientAppointments([]);
@@ -314,7 +475,11 @@ export default function DashboardPage() {
     [role, clinicRole],
   );
 
-  const providerAppointments = providerData?.today_appointments ?? [];
+  const providerAppointments = useMemo(() => {
+    if (todayAppointments.length > 0) return todayAppointments;
+    return providerData?.today_appointments ?? [];
+  }, [providerData?.today_appointments, todayAppointments]);
+
   const providerReferrals = providerData?.pending_referrals ?? [];
 
   const patientUpcomingAppointments = useMemo(() => {
@@ -344,6 +509,7 @@ export default function DashboardPage() {
 
   const providerUpcomingAppointments = useMemo(() => {
     const now = Date.now();
+
     return providerAppointments.filter((item) => {
       if (!item.start_time) return false;
       const value = new Date(item.start_time).getTime();
@@ -924,6 +1090,11 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       ) : null}
+
+      <TodayAppointmentsCard
+        appointments={providerAppointments}
+        clinicRole={clinicRole}
+      />
 
       <section className="mc-stats-grid">
         <QuickActionCard
