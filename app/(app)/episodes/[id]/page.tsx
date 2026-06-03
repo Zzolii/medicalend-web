@@ -9,11 +9,13 @@ import {
   CalendarDays,
   CheckCircle2,
   ClipboardList,
-  FileText,
   MessageSquare,
   Paperclip,
+  Pencil,
   Plus,
+  Save,
   Upload,
+  X,
 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 import { getToken } from "@/lib/auth";
@@ -248,6 +250,10 @@ export default function EpisodeDetailsPage() {
   const [documentTitle, setDocumentTitle] = useState("");
   const [documentFile, setDocumentFile] = useState<File | null>(null);
 
+  const [episodeTitleDraft, setEpisodeTitleDraft] = useState("");
+  const [editingEpisodeTitle, setEditingEpisodeTitle] = useState(false);
+  const [savingEpisodeTitle, setSavingEpisodeTitle] = useState(false);
+
   const [submittingNote, setSubmittingNote] = useState(false);
   const [submittingTask, setSubmittingTask] = useState(false);
   const [submittingDocument, setSubmittingDocument] = useState(false);
@@ -277,6 +283,8 @@ export default function EpisodeDetailsPage() {
         referrals: timelineData.referrals ?? [],
         documents: timelineData.documents ?? [],
       });
+
+      setEpisodeTitleDraft(episode.title || "");
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Nu am putut încărca episodul.",
@@ -290,6 +298,37 @@ export default function EpisodeDetailsPage() {
     void loadEpisode();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [episodeId]);
+
+  async function handleSaveEpisodeTitle() {
+    if (!episodeId || !episodeTitleDraft.trim()) {
+      setError("Titlul episodului nu poate fi gol.");
+      return;
+    }
+
+    try {
+      setSavingEpisodeTitle(true);
+      setError("");
+
+      await apiRequest(`/care-episodes/${episodeId}`, {
+        method: "PUT",
+        token,
+        body: {
+          title: episodeTitleDraft.trim(),
+        },
+      });
+
+      setEditingEpisodeTitle(false);
+      await loadEpisode();
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Nu am putut actualiza titlul episodului.",
+      );
+    } finally {
+      setSavingEpisodeTitle(false);
+    }
+  }
 
   async function handleAddNote() {
     if (!episodeId || !noteText.trim()) return;
@@ -484,7 +523,90 @@ export default function EpisodeDetailsPage() {
             </Link>
           </div>
 
-          <h2>{timeline?.episode.title || `Episod #${episodeId}`}</h2>
+          {editingEpisodeTitle ? (
+            <div style={{ display: "grid", gap: 10, maxWidth: 640 }}>
+              <Input
+                id="episode-title"
+                label="Titlu episod"
+                value={episodeTitleDraft}
+                onChange={(e) => setEpisodeTitleDraft(e.target.value)}
+                placeholder="Ex: Colecistectomie, Control cardiologic"
+              />
+
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Button
+                  onClick={handleSaveEpisodeTitle}
+                  disabled={savingEpisodeTitle}
+                >
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    <Save size={16} />
+                    {savingEpisodeTitle ? "Se salvează..." : "Salvează titlul"}
+                  </span>
+                </Button>
+
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setEditingEpisodeTitle(false);
+                    setEpisodeTitleDraft(timeline?.episode.title || "");
+                  }}
+                  disabled={savingEpisodeTitle}
+                >
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    <X size={16} />
+                    Anulează
+                  </span>
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div
+              style={{
+                display: "flex",
+                gap: 12,
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
+              <h2 style={{ margin: 0 }}>
+                {timeline?.episode.title || `Episod #${episodeId}`}
+              </h2>
+
+              {timeline ? (
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setEpisodeTitleDraft(timeline.episode.title || "");
+                    setEditingEpisodeTitle(true);
+                  }}
+                >
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    <Pencil size={16} />
+                    Editează titlul
+                  </span>
+                </Button>
+              ) : null}
+            </div>
+          )}
+
           <p>
             Vedere de coordonare pentru acest episod: programări, fișiere PDF,
             note și sarcini. Documentele sunt păstrate ca fișiere atașate, fără
