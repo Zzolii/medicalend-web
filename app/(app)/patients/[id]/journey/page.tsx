@@ -12,8 +12,11 @@ import {
   GitBranch,
   MapPin,
   Paperclip,
+  Pencil,
+  Save,
   Upload,
   User,
+  X,
 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 import { getToken } from "@/lib/auth";
@@ -251,6 +254,41 @@ async function uploadEpisodeDocument(
   }
 }
 
+async function updateEpisodeTitle(
+  episodeId: number,
+  token: string | null,
+  title: string,
+) {
+  const apiBase =
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "/api/v1";
+
+  const response = await fetch(`${apiBase}/care-episodes/${episodeId}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ title }),
+  });
+
+  if (!response.ok) {
+    let message = "Nu am putut actualiza titlul episodului.";
+
+    try {
+      const data = await response.json();
+      if (typeof data?.detail === "string" && data.detail.trim()) {
+        message = data.detail;
+      }
+    } catch {}
+
+    throw new Error(message);
+  }
+
+  return response.json();
+}
+
 export default function PatientJourneyPage() {
   const params = useParams<{ id: string }>();
   const patientId = params?.id;
@@ -264,6 +302,14 @@ export default function PatientJourneyPage() {
   >({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  const [editingEpisodeId, setEditingEpisodeId] = useState<number | null>(null);
+  const [episodeTitleDraftById, setEpisodeTitleDraftById] = useState<
+    Record<number, string>
+  >({});
+  const [savingEpisodeTitleId, setSavingEpisodeTitleId] = useState<
+    number | null
+  >(null);
 
   const [uploadTitleByEpisode, setUploadTitleByEpisode] = useState<
     Record<number, string>
@@ -282,14 +328,18 @@ export default function PatientJourneyPage() {
     clinicRole === "assistant" ||
     clinicRole === "clinic_admin";
 
+  const canEditEpisodeTitle =
+    role === "provider" ||
+    clinicRole === "doctor" ||
+    clinicRole === "assistant" ||
+    clinicRole === "clinic_admin";
+
   const loadData = async (currentPatientId: string) => {
     const [patientData, journeyData] = await Promise.all([
       apiRequest<PatientDetails>(`/patients/${currentPatientId}`, { token }),
       apiRequest<PatientJourneyResponse>(
         `/patients/${currentPatientId}/journey`,
-        {
-          token,
-        },
+        { token },
       ),
     ]);
 
@@ -461,6 +511,51 @@ export default function PatientJourneyPage() {
       ),
     [episodes],
   );
+
+  function startEditingEpisodeTitle(episode: JourneyEpisode) {
+    setEditingEpisodeId(episode.id);
+    setEpisodeTitleDraftById((prev) => ({
+      ...prev,
+      [episode.id]: episode.title?.trim() || "",
+    }));
+  }
+
+  function cancelEditingEpisodeTitle() {
+    setEditingEpisodeId(null);
+    setSavingEpisodeTitleId(null);
+  }
+
+  async function handleSaveEpisodeTitle(episodeId: number) {
+    const title = (episodeTitleDraftById[episodeId] ?? "").trim();
+
+    if (!title) {
+      setError("Titlul episodului nu poate fi gol.");
+      return;
+    }
+
+    try {
+      setSavingEpisodeTitleId(episodeId);
+      setError("");
+
+      await updateEpisodeTitle(episodeId, token, title);
+
+      if (!patientId) return;
+
+      const data = await loadData(patientId);
+      setPatient(data.patientData);
+      setJourney(data.journeyData);
+      setDocumentsByEpisode(data.nextDocumentsByEpisode);
+      setEditingEpisodeId(null);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Nu am putut actualiza titlul episodului.",
+      );
+    } finally {
+      setSavingEpisodeTitleId(null);
+    }
+  }
 
   async function handleUploadDocument(episodeId: number) {
     const file = uploadFileByEpisode[episodeId] ?? null;
@@ -736,15 +831,20 @@ export default function PatientJourneyPage() {
                   <div className="mc-status-item">
                     <div className="mc-status-text">
                       <strong>Episoade</strong>
-                      <span>Fiecare card reprezintă un episod separat.</span>
+                      <span>
+                        Fiecare card reprezintă o problemă, intervenție sau
+                        etapă medicală separată.
+                      </span>
                     </div>
                   </div>
 
                   <div className="mc-status-item">
                     <div className="mc-status-text">
-                      <strong>Programări</strong>
+                      <strong>Titlu episod</strong>
                       <span>
-                        Programările sunt afișate direct din endpointul Journey.
+                        Titlul poate fi stabilit de echipa medicală, de exemplu
+                        Colecistectomie, Control cardiologic sau Recuperare
+                        postoperatorie.
                       </span>
                     </div>
                   </div>
@@ -779,6 +879,10 @@ export default function PatientJourneyPage() {
                 const selectedFile = uploadFileByEpisode[episode.id] ?? null;
                 const uploadTitle = uploadTitleByEpisode[episode.id] ?? "";
                 const isUploading = uploadingEpisodeId === episode.id;
+                const isEditingTitle = editingEpisodeId === episode.id;
+                const titleDraft =
+                  episodeTitleDraftById[episode.id] ?? episodeTitle;
+                const isSavingTitle = savingEpisodeTitleId === episode.id;
 
                 return (
                   <Card key={episode.id}>
@@ -789,20 +893,129 @@ export default function PatientJourneyPage() {
                           justifyContent: "space-between",
                           gap: 12,
                           flexWrap: "wrap",
-                          alignItems: "center",
+                          alignItems: "flex-start",
                         }}
                       >
-                        <span>{episodeTitle}</span>
-                        <span className={statusClass(episode.status)}>
-                          {statusLabel(episode.status)}
-                        </span>
+                        <div style={{ flex: 1, minWidth: 260 }}>
+                          {isEditingTitle ? (
+                            <div style={{ display: "grid", gap: 10 }}>
+                              <Input
+                                id={`episode-title-${episode.id}`}
+                                label="Titlu episod"
+                                value={titleDraft}
+                                onChange={(e) =>
+                                  setEpisodeTitleDraftById((prev) => ({
+                                    ...prev,
+                                    [episode.id]: e.target.value,
+                                  }))
+                                }
+                                placeholder="Ex: Colecistectomie, Control cardiologic"
+                              />
+
+                              <div
+                                style={{
+                                  display: "flex",
+                                  gap: 8,
+                                  flexWrap: "wrap",
+                                }}
+                              >
+                                <Button
+                                  onClick={() =>
+                                    handleSaveEpisodeTitle(episode.id)
+                                  }
+                                  disabled={isSavingTitle}
+                                >
+                                  <span
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: 8,
+                                    }}
+                                  >
+                                    <Save size={16} />
+                                    {isSavingTitle
+                                      ? "Se salvează..."
+                                      : "Salvează titlul"}
+                                  </span>
+                                </Button>
+
+                                <Button
+                                  variant="ghost"
+                                  onClick={cancelEditingEpisodeTitle}
+                                  disabled={isSavingTitle}
+                                >
+                                  <span
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: 8,
+                                    }}
+                                  >
+                                    <X size={16} />
+                                    Anulează
+                                  </span>
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div>
+                              <span>{episodeTitle}</span>
+
+                              <div
+                                style={{
+                                  marginTop: 8,
+                                  color: "var(--mc-muted)",
+                                  fontSize: 14,
+                                  fontWeight: 500,
+                                  lineHeight: 1.5,
+                                }}
+                              >
+                                {episode.owner_provider_name ||
+                                  `Furnizor #${episode.owner_provider_id}`}{" "}
+                                • Creat la {formatDateTime(episode.created_at)}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: 8,
+                            flexWrap: "wrap",
+                            alignItems: "center",
+                          }}
+                        >
+                          <span className={statusClass(episode.status)}>
+                            {statusLabel(episode.status)}
+                          </span>
+
+                          {canEditEpisodeTitle && !isEditingTitle ? (
+                            <Button
+                              variant="ghost"
+                              onClick={() => startEditingEpisodeTitle(episode)}
+                            >
+                              <span
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 8,
+                                }}
+                              >
+                                <Pencil size={16} />
+                                Editează titlul
+                              </span>
+                            </Button>
+                          ) : null}
+                        </div>
                       </CardTitle>
 
-                      <CardDescription>
-                        Creat la {formatDateTime(episode.created_at)} •{" "}
-                        {episode.owner_provider_name ||
-                          `Furnizor #${episode.owner_provider_id}`}
-                      </CardDescription>
+                      {!isEditingTitle ? (
+                        <CardDescription>
+                          Titlul episodului descrie problema, intervenția sau
+                          motivul medical principal.
+                        </CardDescription>
+                      ) : null}
                     </CardHeader>
 
                     <CardContent>
