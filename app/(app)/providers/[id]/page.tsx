@@ -1,8 +1,7 @@
 // Path: medicalend-web/app/(app)/providers/[id]/page.tsx
 "use client";
 
-import Link from "next/link";
-import { useParams, useSearchParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
@@ -11,6 +10,7 @@ import {
   CheckCircle2,
   Clock3,
   Globe,
+  Home,
   Loader2,
   Mail,
   MapPin,
@@ -60,6 +60,15 @@ type DoctorRow = {
   is_active?: boolean;
 };
 
+type HomeCareStaffRow = {
+  membership_id: number;
+  user_id: number;
+  clinic_id: number;
+  role: string;
+  display_name: string;
+  email?: string | null;
+};
+
 type ProviderAvailabilitySlot = {
   start_time: string;
   end_time: string;
@@ -70,6 +79,13 @@ type PatientMe = {
   id: number;
   first_name?: string | null;
   last_name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address_line?: string | null;
+  city?: string | null;
+  county?: string | null;
+  postal_code?: string | null;
+  country?: string | null;
 };
 
 type AppointmentCreateResponse = {
@@ -133,9 +149,8 @@ function providerDisplayName(
   providerId?: number,
 ) {
   if (data?.name?.trim()) return data.name.trim();
-  if (providerId && Number.isFinite(providerId)) {
+  if (providerId && Number.isFinite(providerId))
     return `Furnizor #${providerId}`;
-  }
   return "Furnizor medical";
 }
 
@@ -147,6 +162,10 @@ function doctorDisplayName(d: DoctorRow) {
 
 function doctorSubtitle(d: DoctorRow) {
   return d.specialty_name || "Specialitate indisponibilă";
+}
+
+function staffDisplayName(staff: HomeCareStaffRow) {
+  return staff.display_name?.trim() || staff.email || `User #${staff.user_id}`;
 }
 
 function normalizeError(err: unknown, fallback: string) {
@@ -175,26 +194,17 @@ async function tryApi<T>(
 function buildMonthMatrix(viewDate: Date) {
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
-
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
-
   const startWeekday = (firstDay.getDay() + 6) % 7;
   const totalDays = lastDay.getDate();
-
   const cells: Array<{ date: Date | null }> = [];
 
-  for (let i = 0; i < startWeekday; i += 1) {
-    cells.push({ date: null });
-  }
-
+  for (let i = 0; i < startWeekday; i += 1) cells.push({ date: null });
   for (let day = 1; day <= totalDays; day += 1) {
     cells.push({ date: new Date(year, month, day) });
   }
-
-  while (cells.length % 7 !== 0) {
-    cells.push({ date: null });
-  }
+  while (cells.length % 7 !== 0) cells.push({ date: null });
 
   const weeks: Array<Array<{ date: Date | null }>> = [];
   for (let i = 0; i < cells.length; i += 7) {
@@ -209,6 +219,18 @@ function monthLabel(date: Date) {
     month: "long",
     year: "numeric",
   });
+}
+
+function patientAddress(patient?: PatientMe | null) {
+  return [
+    patient?.address_line,
+    patient?.city,
+    patient?.county,
+    patient?.postal_code,
+    patient?.country,
+  ]
+    .filter(Boolean)
+    .join(", ");
 }
 
 const WEEKDAY_LABELS = ["Lu", "Ma", "Mi", "Jo", "Vi", "Sâ", "Du"];
@@ -230,10 +252,14 @@ export default function ProviderDetailsPage() {
 
   const [provider, setProvider] = useState<ProviderDetails | null>(null);
   const [doctors, setDoctors] = useState<DoctorRow[]>([]);
+  const [homeCareStaff, setHomeCareStaff] = useState<HomeCareStaffRow[]>([]);
   const [patientMe, setPatientMe] = useState<PatientMe | null>(null);
 
   const todayYmd = useMemo(() => toYmd(new Date()), []);
   const [selectedDoctorId, setSelectedDoctorId] = useState<number | null>(null);
+  const [selectedStaffUserId, setSelectedStaffUserId] = useState<number | null>(
+    null,
+  );
   const [selectedDate, setSelectedDate] = useState<string>(todayYmd);
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
 
@@ -243,11 +269,13 @@ export default function ProviderDetailsPage() {
 
   const [loading, setLoading] = useState(true);
   const [doctorsBusy, setDoctorsBusy] = useState(false);
+  const [staffBusy, setStaffBusy] = useState(false);
   const [slotsBusy, setSlotsBusy] = useState(false);
   const [bookingBusy, setBookingBusy] = useState(false);
 
   const [error, setError] = useState("");
   const [doctorsError, setDoctorsError] = useState("");
+  const [staffError, setStaffError] = useState("");
   const [slotsError, setSlotsError] = useState("");
   const [bookingError, setBookingError] = useState("");
   const [success, setSuccess] = useState("");
@@ -256,10 +284,18 @@ export default function ProviderDetailsPage() {
   const [bookingNotes, setBookingNotes] = useState("");
 
   const isPatient = currentUser?.role === "patient";
+  const isHomeCare = provider?.provider_type === "home_care";
 
   const selectedDoctor = useMemo(
     () => doctors.find((item) => item.id === selectedDoctorId) ?? null,
     [doctors, selectedDoctorId],
+  );
+
+  const selectedStaff = useMemo(
+    () =>
+      homeCareStaff.find((item) => item.user_id === selectedStaffUserId) ??
+      null,
+    [homeCareStaff, selectedStaffUserId],
   );
 
   const availableSlots = useMemo(
@@ -271,6 +307,8 @@ export default function ProviderDetailsPage() {
     () => buildMonthMatrix(calendarMonth),
     [calendarMonth],
   );
+
+  const addressText = useMemo(() => patientAddress(patientMe), [patientMe]);
 
   useEffect(() => {
     if (!Number.isFinite(providerId) || providerId <= 0) {
@@ -326,6 +364,19 @@ export default function ProviderDetailsPage() {
     );
   }
 
+  async function loadHomeCareStaff() {
+    return tryApi<HomeCareStaffRow[]>(
+      [
+        () =>
+          apiRequest<HomeCareStaffRow[]>(
+            `/home-care/providers/${providerId}/staff?role=assistant`,
+            { token },
+          ),
+      ],
+      "Încărcarea asistenților Home Care a eșuat.",
+    );
+  }
+
   async function loadPatientMe() {
     return tryApi<PatientMe>(
       [() => apiRequest<PatientMe>("/patients/me", { token })],
@@ -338,11 +389,23 @@ export default function ProviderDetailsPage() {
       setLoading(true);
       setError("");
       setDoctorsError("");
+      setStaffError("");
       setBookingError("");
       setSuccess("");
 
-      const providerPromise = loadProvider();
+      const providerData = await loadProvider();
+      setProvider(providerData);
+
+      const isLoadedProviderHomeCare =
+        providerData.provider_type === "home_care";
+
       const doctorsPromise = (async () => {
+        if (isLoadedProviderHomeCare) {
+          setDoctors([]);
+          setSelectedDoctorId(null);
+          return [] as DoctorRow[];
+        }
+
         try {
           setDoctorsBusy(true);
           const rows = await loadDoctors();
@@ -357,30 +420,58 @@ export default function ProviderDetailsPage() {
         }
       })();
 
+      const staffPromise = (async () => {
+        if (!isLoadedProviderHomeCare) {
+          setHomeCareStaff([]);
+          setSelectedStaffUserId(null);
+          return [] as HomeCareStaffRow[];
+        }
+
+        try {
+          setStaffBusy(true);
+          const rows = await loadHomeCareStaff();
+          setHomeCareStaff(rows ?? []);
+          return rows ?? [];
+        } catch (err) {
+          setHomeCareStaff([]);
+          setStaffError(
+            normalizeError(err, "Încărcarea asistenților Home Care a eșuat."),
+          );
+          return [];
+        } finally {
+          setStaffBusy(false);
+        }
+      })();
+
       const patientPromise =
         token && isPatient
           ? loadPatientMe().catch(() => null)
           : Promise.resolve(null);
 
-      const [providerData, doctorRows, patientData] = await Promise.all([
-        providerPromise,
+      const [doctorRows, staffRows, patientData] = await Promise.all([
         doctorsPromise,
+        staffPromise,
         patientPromise,
       ]);
 
-      setProvider(providerData);
       setPatientMe(patientData);
 
-      if (
-        Number.isFinite(parsedDoctorIdFromQuery) &&
-        parsedDoctorIdFromQuery > 0 &&
-        doctorRows.some((item) => item.id === parsedDoctorIdFromQuery)
-      ) {
-        setSelectedDoctorId(parsedDoctorIdFromQuery);
-      } else if (doctorRows.length > 0) {
-        setSelectedDoctorId(doctorRows[0].id);
-      } else {
-        setSelectedDoctorId(null);
+      if (!isLoadedProviderHomeCare) {
+        if (
+          Number.isFinite(parsedDoctorIdFromQuery) &&
+          parsedDoctorIdFromQuery > 0 &&
+          doctorRows.some((item) => item.id === parsedDoctorIdFromQuery)
+        ) {
+          setSelectedDoctorId(parsedDoctorIdFromQuery);
+        } else if (doctorRows.length > 0) {
+          setSelectedDoctorId(doctorRows[0].id);
+        } else {
+          setSelectedDoctorId(null);
+        }
+      }
+
+      if (isLoadedProviderHomeCare) {
+        setSelectedStaffUserId(staffRows[0]?.user_id ?? null);
       }
     } catch (err) {
       setError(normalizeError(err, "Nu am putut încărca furnizorul."));
@@ -395,9 +486,8 @@ export default function ProviderDetailsPage() {
       setSlotsError("");
       setSelectedSlot(null);
 
-      const doctorQuery = selectedDoctorId
-        ? `&doctor_id=${selectedDoctorId}`
-        : "";
+      const doctorQuery =
+        selectedDoctorId && !isHomeCare ? `&doctor_id=${selectedDoctorId}` : "";
 
       const rows = await tryApi<ProviderAvailabilitySlot[]>(
         [
@@ -430,15 +520,6 @@ export default function ProviderDetailsPage() {
     }
   }
 
-  function onPickSlot(slot: ProviderAvailabilitySlot) {
-    if (!slot.available) return;
-    setSelectedSlot(slot);
-    setBookingNotes("");
-    setBookingError("");
-    setSuccess("");
-    setConfirmOpen(true);
-  }
-
   async function confirmBooking() {
     if (!selectedSlot) return;
 
@@ -461,21 +542,39 @@ export default function ProviderDetailsPage() {
       return;
     }
 
+    if (isHomeCare && !addressText) {
+      setBookingError(
+        "Pentru Home Care este necesară adresa pacientului. Completează adresa în profilul tău de pacient.",
+      );
+      return;
+    }
+
     try {
       setBookingBusy(true);
       setBookingError("");
       setSuccess("");
 
+      const finalNotes = [
+        isHomeCare ? "Tip programare: Home Care / vizită la domiciliu." : null,
+        isHomeCare && selectedStaff
+          ? `Asistent solicitat: ${staffDisplayName(selectedStaff)} (user_id=${selectedStaff.user_id}).`
+          : null,
+        isHomeCare && addressText ? `Adresă pacient: ${addressText}.` : null,
+        bookingNotes.trim() ? bookingNotes.trim() : null,
+      ]
+        .filter(Boolean)
+        .join("\n");
+
       const payload = {
         patient_id: patientMe.id,
         provider_id: providerId,
-        doctor_id: selectedDoctorId,
+        doctor_id: isHomeCare ? null : selectedDoctorId,
         start_time: toBackendNaiveIso(selectedSlot.start_time),
         end_time: selectedSlot.end_time
           ? toBackendNaiveIso(selectedSlot.end_time)
           : null,
         status: "scheduled",
-        notes: bookingNotes.trim() ? bookingNotes.trim() : null,
+        notes: finalNotes || null,
       };
 
       const created = await tryApi<AppointmentCreateResponse>(
@@ -513,6 +612,7 @@ export default function ProviderDetailsPage() {
 
   async function openWebsite(url?: string | null) {
     if (!url?.trim()) return;
+
     let normalized = url.trim();
     if (
       !normalized.startsWith("http://") &&
@@ -520,6 +620,7 @@ export default function ProviderDetailsPage() {
     ) {
       normalized = `https://${normalized}`;
     }
+
     window.open(normalized, "_blank", "noopener,noreferrer");
   }
 
@@ -656,8 +757,9 @@ export default function ProviderDetailsPage() {
               </h2>
 
               <p style={{ marginTop: 12 }}>
-                Profil public al furnizorului, medici disponibili, calendar și
-                intervale pentru programare.
+                {isHomeCare
+                  ? "Profil public al furnizorului Home Care, acoperire, calendar și intervale pentru vizite la domiciliu."
+                  : "Profil public al furnizorului, medici disponibili, calendar și intervale pentru programare."}
               </p>
 
               <div
@@ -675,9 +777,16 @@ export default function ProviderDetailsPage() {
                       .join(", ")}
                   </span>
                 ) : null}
+
                 {provider.specialty ? (
                   <span className="mc-pill mc-pill-info">
                     {provider.specialty}
+                  </span>
+                ) : null}
+
+                {isHomeCare && provider.coverage_area ? (
+                  <span className="mc-pill mc-pill-success">
+                    Acoperire: {provider.coverage_area}
                   </span>
                 ) : null}
               </div>
@@ -688,7 +797,9 @@ export default function ProviderDetailsPage() {
                 <strong>Programare online</strong>
                 <span>
                   {isPatient
-                    ? "Poți selecta medicul, ziua și intervalul direct din această pagină."
+                    ? isHomeCare
+                      ? "Poți selecta ziua, intervalul și, opțional, asistentul pentru vizita la domiciliu."
+                      : "Poți selecta medicul, ziua și intervalul direct din această pagină."
                     : "Pentru rezervare directă este necesar un cont de pacient."}
                 </span>
               </div>
@@ -793,6 +904,16 @@ export default function ProviderDetailsPage() {
                   </span>
                 </div>
 
+                {isHomeCare && provider.coverage_area ? (
+                  <div className="mc-list-item">
+                    <strong>
+                      <Home size={15} style={{ marginRight: 6 }} />
+                      Zonă acoperire Home Care
+                    </strong>
+                    <span>{provider.coverage_area}</span>
+                  </div>
+                ) : null}
+
                 {provider.services_offered ? (
                   <div className="mc-muted-block">
                     <strong style={{ color: "var(--mc-text)" }}>
@@ -829,94 +950,187 @@ export default function ProviderDetailsPage() {
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 8,
-                    }}
-                  >
-                    <Stethoscope size={18} />
-                    Alege medicul
-                  </span>
-                </CardTitle>
-                <CardDescription>
-                  Dacă ai venit din căutarea unui medic, acesta este selectat
-                  automat.
-                </CardDescription>
-              </CardHeader>
-
-              <CardContent>
-                {doctorsBusy ? (
-                  <div className="mc-muted-block">
+            {isHomeCare ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>
                     <span
                       style={{
                         display: "inline-flex",
                         alignItems: "center",
-                        gap: 10,
+                        gap: 8,
                       }}
                     >
-                      <Loader2 className="mc-spinner" />
-                      Se încarcă medicii...
+                      <UserRound size={18} />
+                      Alege asistentul
                     </span>
-                  </div>
-                ) : doctorsError ? (
-                  <p className="mc-error-banner">{doctorsError}</p>
-                ) : doctors.length === 0 ? (
-                  <div className="mc-muted-block">
-                    <span>
-                      Nu există listă publică de medici. Programarea se poate
-                      face la nivel de furnizor.
-                    </span>
-                  </div>
-                ) : (
-                  <div className="mc-list">
-                    {doctors.map((doctor) => {
-                      const active = selectedDoctorId === doctor.id;
+                  </CardTitle>
+                  <CardDescription>
+                    Pentru Home Care poți alege persoana care va efectua vizita
+                    la domiciliu, dacă furnizorul a publicat asistenți.
+                  </CardDescription>
+                </CardHeader>
 
-                      return (
-                        <button
-                          key={doctor.id}
-                          type="button"
-                          className="mc-list-item"
-                          onClick={() => setSelectedDoctorId(doctor.id)}
-                          style={{
-                            textAlign: "left",
-                            border: active
-                              ? "1px solid var(--mc-primary)"
-                              : "1px solid var(--mc-border)",
-                            background: active
-                              ? "var(--mc-primary-soft)"
-                              : "var(--mc-surface-2)",
-                            cursor: "pointer",
-                          }}
-                        >
-                          <strong>
-                            <UserRound size={14} style={{ marginRight: 6 }} />
-                            {doctorDisplayName(doctor)}
-                          </strong>
-                          <span>{doctorSubtitle(doctor)}</span>
-                          {active ? (
-                            <span
-                              style={{
-                                color: "var(--mc-primary)",
-                                fontWeight: 700,
-                                marginTop: 4,
-                              }}
-                            >
-                              Selectat
-                            </span>
-                          ) : null}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                <CardContent>
+                  {staffBusy ? (
+                    <div className="mc-muted-block">
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 10,
+                        }}
+                      >
+                        <Loader2 className="mc-spinner" />
+                        Se încarcă asistenții...
+                      </span>
+                    </div>
+                  ) : staffError ? (
+                    <p className="mc-error-banner">{staffError}</p>
+                  ) : homeCareStaff.length === 0 ? (
+                    <div className="mc-muted-block">
+                      <span>
+                        Nu există asistenți publicați. Programarea se poate face
+                        la nivel de furnizor Home Care.
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="mc-list">
+                      {homeCareStaff.map((staff) => {
+                        const active = selectedStaffUserId === staff.user_id;
+
+                        return (
+                          <button
+                            key={staff.user_id}
+                            type="button"
+                            className="mc-list-item"
+                            onClick={() =>
+                              setSelectedStaffUserId(staff.user_id)
+                            }
+                            style={{
+                              textAlign: "left",
+                              border: active
+                                ? "1px solid var(--mc-primary)"
+                                : "1px solid var(--mc-border)",
+                              background: active
+                                ? "var(--mc-primary-soft)"
+                                : "var(--mc-surface-2)",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <strong>
+                              <UserRound size={14} style={{ marginRight: 6 }} />
+                              {staffDisplayName(staff)}
+                            </strong>
+                            <span>{staff.email || "email indisponibil"}</span>
+                            {active ? (
+                              <span
+                                style={{
+                                  color: "var(--mc-primary)",
+                                  fontWeight: 700,
+                                  marginTop: 4,
+                                }}
+                              >
+                                Selectat
+                              </span>
+                            ) : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ) : (
+              <Card>
+                <CardHeader>
+                  <CardTitle>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
+                      <Stethoscope size={18} />
+                      Alege medicul
+                    </span>
+                  </CardTitle>
+                  <CardDescription>
+                    Dacă ai venit din căutarea unui medic, acesta este selectat
+                    automat.
+                  </CardDescription>
+                </CardHeader>
+
+                <CardContent>
+                  {doctorsBusy ? (
+                    <div className="mc-muted-block">
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 10,
+                        }}
+                      >
+                        <Loader2 className="mc-spinner" />
+                        Se încarcă medicii...
+                      </span>
+                    </div>
+                  ) : doctorsError ? (
+                    <p className="mc-error-banner">{doctorsError}</p>
+                  ) : doctors.length === 0 ? (
+                    <div className="mc-muted-block">
+                      <span>
+                        Nu există listă publică de medici. Programarea se poate
+                        face la nivel de furnizor.
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="mc-list">
+                      {doctors.map((doctor) => {
+                        const active = selectedDoctorId === doctor.id;
+
+                        return (
+                          <button
+                            key={doctor.id}
+                            type="button"
+                            className="mc-list-item"
+                            onClick={() => setSelectedDoctorId(doctor.id)}
+                            style={{
+                              textAlign: "left",
+                              border: active
+                                ? "1px solid var(--mc-primary)"
+                                : "1px solid var(--mc-border)",
+                              background: active
+                                ? "var(--mc-primary-soft)"
+                                : "var(--mc-surface-2)",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <strong>
+                              <UserRound size={14} style={{ marginRight: 6 }} />
+                              {doctorDisplayName(doctor)}
+                            </strong>
+                            <span>{doctorSubtitle(doctor)}</span>
+                            {active ? (
+                              <span
+                                style={{
+                                  color: "var(--mc-primary)",
+                                  fontWeight: 700,
+                                  marginTop: 4,
+                                }}
+                              >
+                                Selectat
+                              </span>
+                            ) : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           <div style={{ display: "grid", gap: 18 }}>
@@ -1044,12 +1258,36 @@ export default function ProviderDetailsPage() {
               </CardHeader>
 
               <CardContent style={{ display: "grid", gap: 14 }}>
-                {selectedDoctor ? (
+                {selectedDoctor && !isHomeCare ? (
                   <div className="mc-muted-block">
                     <strong style={{ color: "var(--mc-text)" }}>
                       Medic selectat
                     </strong>
                     <span>{doctorDisplayName(selectedDoctor)}</span>
+                  </div>
+                ) : null}
+
+                {selectedStaff && isHomeCare ? (
+                  <div className="mc-muted-block">
+                    <strong style={{ color: "var(--mc-text)" }}>
+                      Asistent selectat
+                    </strong>
+                    <span>{staffDisplayName(selectedStaff)}</span>
+                  </div>
+                ) : null}
+
+                {isHomeCare && isPatient ? (
+                  <div
+                    className={
+                      addressText ? "mc-info-banner" : "mc-warning-banner"
+                    }
+                  >
+                    <MapPin size={16} />
+                    <span>
+                      {addressText
+                        ? `Adresa pentru vizită: ${addressText}`
+                        : "Pentru Home Care completează adresa în profilul de pacient înainte de rezervare."}
+                    </span>
                   </div>
                 ) : null}
 
@@ -1126,6 +1364,7 @@ export default function ProviderDetailsPage() {
                 {bookingError ? (
                   <p className="mc-error-banner">{bookingError}</p>
                 ) : null}
+
                 {success ? (
                   <div
                     style={{
@@ -1231,10 +1470,17 @@ export default function ProviderDetailsPage() {
               </strong>
               <span>Data: {selectedDate}</span>
               <span>
-                Medic:{" "}
-                {selectedDoctor
-                  ? doctorDisplayName(selectedDoctor)
-                  : "Nespecificat"}
+                {isHomeCare
+                  ? `Asistent: ${
+                      selectedStaff
+                        ? staffDisplayName(selectedStaff)
+                        : "Fără preferință"
+                    }`
+                  : `Medic: ${
+                      selectedDoctor
+                        ? doctorDisplayName(selectedDoctor)
+                        : "Nespecificat"
+                    }`}
               </span>
               <span>
                 Interval:{" "}
@@ -1242,17 +1488,28 @@ export default function ProviderDetailsPage() {
                   ? `${formatWallClockTime(selectedSlot.start_time)}–${formatWallClockTime(selectedSlot.end_time)}`
                   : "-"}
               </span>
+              {isHomeCare ? (
+                <span>
+                  Adresă vizită: {addressText || "Adresă pacient nespecificată"}
+                </span>
+              ) : null}
             </div>
 
             <div className="mc-field">
               <label className="mc-label" htmlFor="booking-notes">
-                Motiv / detalii (opțional)
+                {isHomeCare
+                  ? "Detalii pentru vizita la domiciliu (opțional)"
+                  : "Motiv / detalii (opțional)"}
               </label>
               <textarea
                 id="booking-notes"
                 value={bookingNotes}
                 onChange={(e) => setBookingNotes(e.target.value)}
-                placeholder="Ex.: control, simptome, consult..."
+                placeholder={
+                  isHomeCare
+                    ? "Ex.: pacient imobilizat, interfon, etaj, persoană de contact..."
+                    : "Ex.: control, simptome, consult..."
+                }
                 disabled={bookingBusy}
                 style={{
                   width: "100%",
