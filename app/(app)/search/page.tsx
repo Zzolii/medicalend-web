@@ -534,23 +534,40 @@ export default function SearchPage() {
       const tasks: Promise<unknown>[] = [];
 
       if (shouldSearchClinics) {
-        const providerType =
-          filter === "home_care"
-            ? "home_care"
-            : filter === "clinic"
-              ? "clinic"
-              : "";
-
-        tasks.push(
-          apiRequest<ClinicRow[]>(
-            `/providers/search-clinics${buildQuery({
-              name: trimmed,
-              city: cityFilter,
-              county: countyFilter,
-              provider_type: providerType,
-            })}`,
-          ).then((rows) => setClinics(rows ?? [])),
-        );
+        if (filter === "home_care") {
+          tasks.push(
+            apiRequest<ClinicRow[]>(
+              `/providers/search-homecare${buildQuery({
+                name: trimmed,
+                city: cityFilter,
+                county: countyFilter,
+                service: specialtyFilter,
+                coverage_area: cityFilter || countyFilter,
+              })}`,
+            ).then((rows) => setClinics(rows ?? [])),
+          );
+        } else if (filter === "clinic") {
+          tasks.push(
+            apiRequest<ClinicRow[]>(
+              `/providers/search-clinics${buildQuery({
+                name: trimmed,
+                city: cityFilter,
+                county: countyFilter,
+                specialty: specialtyFilter,
+              })}`,
+            ).then((rows) => setClinics(rows ?? [])),
+          );
+        } else {
+          tasks.push(
+            apiRequest<ClinicRow[]>(
+              `/providers/search${buildQuery({
+                name: trimmed,
+                city: cityFilter,
+                county: countyFilter,
+              })}`,
+            ).then((rows) => setClinics(rows ?? [])),
+          );
+        }
       }
 
       if (shouldSearchDoctors) {
@@ -687,7 +704,9 @@ export default function SearchPage() {
                   placeholder={
                     filter === "doctor"
                       ? "Ex: Urologie"
-                      : "Opțional pentru medici"
+                      : filter === "home_care"
+                        ? "Ex: îngrijire la domiciliu"
+                        : "Opțional pentru medici"
                   }
                 />
 
