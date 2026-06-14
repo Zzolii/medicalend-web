@@ -90,12 +90,15 @@ type ProviderStructureOut = {
   doctors?: ProviderDoctorOut[];
 };
 
+type SlotDurationMinutes = 5 | 10 | 15 | 20 | 30;
+
 type ProviderWeeklyAvailabilityOut = {
   id: number;
   doctor_id?: number | null;
   weekday: number;
   start_time: string;
   end_time: string;
+  slot_duration_minutes?: SlotDurationMinutes | number | null;
 };
 
 type ProviderAvailabilityExceptionOut = {
@@ -107,6 +110,8 @@ type ProviderAvailabilityExceptionOut = {
   end_time?: string | null;
   note?: string | null;
 };
+
+const SLOT_DURATION_OPTIONS: SlotDurationMinutes[] = [5, 10, 15, 20, 30];
 
 const WEEKDAYS = [
   { value: 0, label: "Luni" },
@@ -316,6 +321,7 @@ async function upsertMyWeeklyAvailability(
     weekday: number;
     start_time: string;
     end_time: string;
+    slot_duration_minutes: SlotDurationMinutes;
   },
 ) {
   return tryApi(
@@ -461,6 +467,8 @@ export default function ProfilePage() {
   const [selectedWeekday, setSelectedWeekday] = useState<number>(0);
   const [availabilityStart, setAvailabilityStart] = useState("08:00");
   const [availabilityEnd, setAvailabilityEnd] = useState("16:00");
+  const [slotDurationMinutes, setSlotDurationMinutes] =
+    useState<SlotDurationMinutes>(30);
 
   const [exceptionDate, setExceptionDate] = useState("");
   const [exceptionClosed, setExceptionClosed] = useState(true);
@@ -786,6 +794,7 @@ export default function ProfilePage() {
         weekday: selectedWeekday,
         start_time: `${normalizeTimeInput(availabilityStart)}:00`,
         end_time: `${normalizeTimeInput(availabilityEnd)}:00`,
+        slot_duration_minutes: slotDurationMinutes,
       });
 
       setSuccess("Programul săptămânal a fost salvat.");
@@ -1493,6 +1502,7 @@ export default function ProfilePage() {
                   </div>
 
                   <div />
+
                   <Input
                     id="availability-start"
                     label="Ora de început"
@@ -1500,6 +1510,7 @@ export default function ProfilePage() {
                     value={availabilityStart}
                     onChange={(e) => setAvailabilityStart(e.target.value)}
                   />
+
                   <Input
                     id="availability-end"
                     label="Ora de sfârșit"
@@ -1507,6 +1518,26 @@ export default function ProfilePage() {
                     value={availabilityEnd}
                     onChange={(e) => setAvailabilityEnd(e.target.value)}
                   />
+
+                  <div className="mc-grid-span-2">
+                    <label className="mc-label">Durată slot</label>
+                    <div className="mc-chip-row" style={{ marginTop: 10 }}>
+                      {SLOT_DURATION_OPTIONS.map((minutes) => (
+                        <button
+                          key={minutes}
+                          type="button"
+                          className={
+                            slotDurationMinutes === minutes
+                              ? "mc-chip mc-chip-active"
+                              : "mc-chip"
+                          }
+                          onClick={() => setSlotDurationMinutes(minutes)}
+                        >
+                          {minutes} min
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
                 <div style={{ marginTop: 16 }}>
@@ -1534,7 +1565,8 @@ export default function ProfilePage() {
                         <div key={item.id} className="mc-list-item">
                           <strong>{weekdayLabel(item.weekday)}</strong>
                           <span>
-                            {item.start_time} – {item.end_time}
+                            {item.start_time} – {item.end_time} • slot{" "}
+                            {item.slot_duration_minutes ?? 30} min
                           </span>
                           <span>
                             doctor_id: {item.doctor_id ?? "clinic general"}
@@ -1666,7 +1698,9 @@ export default function ProfilePage() {
                           <span>
                             {item.is_closed
                               ? "Închis"
-                              : `${item.start_time || "?"} – ${item.end_time || "?"}`}
+                              : `${item.start_time || "?"} – ${
+                                  item.end_time || "?"
+                                }`}
                           </span>
                           <span>{item.note || "Fără notă"}</span>
                           <span>
