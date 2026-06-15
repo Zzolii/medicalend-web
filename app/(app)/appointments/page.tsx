@@ -48,12 +48,15 @@ type StatusFilter =
 
 function formatDateTime(value?: string | null) {
   if (!value) return "Nespecificat";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString("ro-RO", {
-    dateStyle: "short",
-    timeStyle: "short",
-  });
+
+  const raw = String(value).trim();
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})/);
+
+  if (!match) return raw;
+
+  const [, year, month, day, hour, minute] = match;
+
+  return `${day}.${month}.${year}, ${hour}:${minute}`;
 }
 
 function getStatusClass(status?: string) {
