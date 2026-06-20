@@ -246,10 +246,10 @@ export default function RegisterProviderPage() {
     <div className="mc-auth-shell">
       <Card className="mc-auth-card mc-auth-card-wide">
         <CardHeader>
-          <CardTitle>Înregistrare furnizor</CardTitle>
+          <CardTitle>Înregistrare Clinic/Medic</CardTitle>
           <CardDescription>
-            Creează contul clinicii sau al serviciului home care și trimite-l
-            spre verificare.
+            Creează contul clinicii, cabinetului medical, medicului independent
+            sau al serviciului home care și trimite-l spre verificare.
           </CardDescription>
         </CardHeader>
 
@@ -275,7 +275,7 @@ export default function RegisterProviderPage() {
             />
 
             <div className="mc-grid-span-2">
-              <label className="mc-label">Tip furnizor *</label>
+              <label className="mc-label">Tip profil *</label>
               <div className="mc-chip-row" style={{ marginTop: 10 }}>
                 <button
                   type="button"
@@ -287,7 +287,7 @@ export default function RegisterProviderPage() {
                   onClick={() => setProviderType("clinic")}
                   disabled={busy}
                 >
-                  Clinică
+                  Clinică/Medic
                 </button>
                 <button
                   type="button"
@@ -307,7 +307,7 @@ export default function RegisterProviderPage() {
             <div className="mc-grid-span-2">
               <Input
                 id="provider-name"
-                label="Nume clinică / furnizor *"
+                label="Nume clinică / Medic *"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Ex.: Clinica Exemplu"
@@ -530,7 +530,7 @@ export default function RegisterProviderPage() {
                 disabled={busy}
               />
               <span>
-                Confirm că furnizorul respectă cerințele legale și de
+                Confirm că profilul Clinic/Medic respectă cerințele legale și de
                 conformitate medicală.
               </span>
             </label>
@@ -542,7 +542,7 @@ export default function RegisterProviderPage() {
                 onChange={(e) => setProviderAgreementAccepted(e.target.checked)}
                 disabled={busy}
               />
-              <span>Accept termenii și condițiile pentru furnizori.</span>
+              <span>Accept termenii și condițiile pentru Clinic/Medic.</span>
             </label>
           </div>
 

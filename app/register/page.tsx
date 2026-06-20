@@ -36,7 +36,7 @@ export default function RegisterChoicePage() {
                   Creează un cont pentru programări, episoade și urmărirea
                   îngrijirii.
                 </p>
-                <Button className="w-full">Continuă ca pacient</Button>
+                <Button className="w-full">Înregistrare ca pacient</Button>
               </div>
             </Link>
 
@@ -45,13 +45,14 @@ export default function RegisterChoicePage() {
                 <div className="mc-choice-icon">
                   <BriefcaseMedical size={22} />
                 </div>
-                <h3>Furnizor</h3>
+                <h3>Clinic/Medic</h3>
                 <p>
-                  Creează un cont de clinică sau home care și trimite datele
-                  pentru aprobare.
+                  Creează un cont pentru clinică, cabinet medical, medic
+                  independent sau serviciu home care și trimite datele pentru
+                  aprobare.
                 </p>
                 <Button variant="secondary" className="w-full">
-                  Continuă ca furnizor
+                  Clinic/Medic
                 </Button>
               </div>
             </Link>
