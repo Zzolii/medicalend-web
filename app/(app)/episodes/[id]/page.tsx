@@ -9,11 +9,15 @@ import {
   CalendarDays,
   CheckCircle2,
   ClipboardList,
+  FileText,
+  GitBranch,
   MessageSquare,
   Paperclip,
   Pencil,
   Plus,
   Save,
+  Send,
+  Stethoscope,
   Upload,
   X,
 } from "lucide-react";
@@ -97,10 +101,15 @@ type EpisodeTimeline = {
 
 type TimelineFeedItemBase = {
   id: string;
+  rawId: number;
   sortAt: string | null | undefined;
   title: string;
   subtitle: string;
   status?: string;
+  eventDateLabel: string;
+  eventTimeLabel: string;
+  isFuture: boolean;
+  isCompleted: boolean;
 };
 
 type TimelineFeedItem =
@@ -122,6 +131,12 @@ type TimelineFeedItem =
       documentId: number;
     });
 
+type TimelineGroup = {
+  key: string;
+  label: string;
+  items: TimelineFeedItem[];
+};
+
 function formatDateTime(value?: string | null) {
   if (!value) return "Nespecificat";
   const parsed = new Date(value);
@@ -130,6 +145,34 @@ function formatDateTime(value?: string | null) {
     dateStyle: "short",
     timeStyle: "short",
   });
+}
+
+function formatDateOnly(value?: string | null) {
+  if (!value) return "Fără dată";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString("ro-RO", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function formatTimeOnly(value?: string | null) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleTimeString("ro-RO", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function getDateGroupKey(value?: string | null) {
+  if (!value) return "unknown";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toISOString().slice(0, 10);
 }
 
 function getStatusLabel(status?: string) {
@@ -193,6 +236,188 @@ function appointmentSubtitle(item: TimelineAppointment) {
   if (item.provider_name?.trim()) return item.provider_name.trim();
 
   return "Clinică / specialist";
+}
+
+function isFutureDate(value?: string | null) {
+  if (!value) return false;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return false;
+  return parsed.getTime() > Date.now();
+}
+
+function isCompletedStatus(status?: string) {
+  return status === "completed" || status === "done" || status === "closed";
+}
+
+function eventIcon(kind: TimelineFeedItem["kind"]) {
+  if (kind === "appointment") return <CalendarDays size={18} />;
+  if (kind === "document") return <FileText size={18} />;
+  if (kind === "note") return <MessageSquare size={18} />;
+  if (kind === "task") return <ClipboardList size={18} />;
+  return <Send size={18} />;
+}
+
+function eventLabel(kind: TimelineFeedItem["kind"]) {
+  if (kind === "appointment") return "Programare";
+  if (kind === "document") return "Document";
+  if (kind === "note") return "Notă";
+  if (kind === "task") return "Sarcină";
+  return "Trimitere";
+}
+
+function eventAccent(kind: TimelineFeedItem["kind"]) {
+  if (kind === "appointment") return "#2563EB";
+  if (kind === "document") return "#7C3AED";
+  if (kind === "note") return "#F97316";
+  if (kind === "task") return "#16A34A";
+  return "#0891B2";
+}
+
+function eventSoftBg(kind: TimelineFeedItem["kind"]) {
+  if (kind === "appointment") return "rgba(37,99,235,0.10)";
+  if (kind === "document") return "rgba(124,58,237,0.10)";
+  if (kind === "note") return "rgba(249,115,22,0.10)";
+  if (kind === "task") return "rgba(22,163,74,0.10)";
+  return "rgba(8,145,178,0.10)";
+}
+
+function buildTimelineFeed(timeline: EpisodeTimeline): TimelineFeedItem[] {
+  const appointments: TimelineFeedItem[] = timeline.appointments.map((item) => {
+    const start = item.start_time;
+
+    return {
+      kind: "appointment",
+      rawId: item.id,
+      id: `appointment-${item.id}`,
+      sortAt: start,
+      title: appointmentTitle(item),
+      subtitle: appointmentSubtitle(item),
+      status: item.status,
+      href: `/appointments/${item.id}`,
+      eventDateLabel: formatDateOnly(start),
+      eventTimeLabel: formatTimeOnly(start),
+      isFuture: isFutureDate(start),
+      isCompleted: isCompletedStatus(item.status),
+    };
+  });
+
+  const notes: TimelineFeedItem[] = timeline.notes.map((item) => ({
+    kind: "note",
+    rawId: item.id,
+    id: `note-${item.id}`,
+    sortAt: item.created_at,
+    title: "Notă de coordonare",
+    subtitle: item.text || "Fără conținut",
+    status: undefined,
+    eventDateLabel: formatDateOnly(item.created_at),
+    eventTimeLabel: formatTimeOnly(item.created_at),
+    isFuture: false,
+    isCompleted: true,
+  }));
+
+  const tasks: TimelineFeedItem[] = timeline.tasks.map((item) => ({
+    kind: "task",
+    rawId: item.id,
+    id: `task-${item.id}`,
+    sortAt: item.due_at,
+    title: item.title || `Sarcină #${item.id}`,
+    subtitle: item.assigned_to_role
+      ? `Rol: ${item.assigned_to_role}`
+      : "Fără rol atribuit",
+    status: item.status,
+    eventDateLabel: formatDateOnly(item.due_at),
+    eventTimeLabel: formatTimeOnly(item.due_at),
+    isFuture: isFutureDate(item.due_at),
+    isCompleted: isCompletedStatus(item.status),
+  }));
+
+  const documents: TimelineFeedItem[] = timeline.documents.map((item) => ({
+    kind: "document",
+    rawId: item.id,
+    id: `document-${item.id}`,
+    sortAt: item.created_at,
+    title: item.title || item.file_name || `Document #${item.id}`,
+    subtitle: item.appointment_id
+      ? `PDF atașat programării #${item.appointment_id}`
+      : "PDF atașat episodului",
+    status: undefined,
+    documentId: item.id,
+    eventDateLabel: formatDateOnly(item.created_at),
+    eventTimeLabel: formatTimeOnly(item.created_at),
+    isFuture: false,
+    isCompleted: true,
+  }));
+
+  const referrals: TimelineFeedItem[] = timeline.referrals.map((item) => ({
+    kind: "referral",
+    rawId: item.id,
+    id: `referral-${item.id}`,
+    sortAt: item.created_at,
+    title: "Trimitere către alt furnizor",
+    subtitle: item.reason || "Element de coordonare între furnizori",
+    status: item.status,
+    eventDateLabel: formatDateOnly(item.created_at),
+    eventTimeLabel: formatTimeOnly(item.created_at),
+    isFuture: false,
+    isCompleted: isCompletedStatus(item.status),
+  }));
+
+  return sortDescByDate<TimelineFeedItem>([
+    ...appointments,
+    ...documents,
+    ...notes,
+    ...tasks,
+    ...referrals,
+  ]);
+}
+
+function groupTimelineByDate(items: TimelineFeedItem[]): TimelineGroup[] {
+  const map = new Map<string, TimelineGroup>();
+
+  for (const item of items) {
+    const key = getDateGroupKey(item.sortAt);
+    const label = item.eventDateLabel || "Fără dată";
+
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        label,
+        items: [],
+      });
+    }
+
+    map.get(key)?.items.push(item);
+  }
+
+  return Array.from(map.values());
+}
+
+function getLatestEvent(timelineFeed: TimelineFeedItem[]) {
+  return timelineFeed[0] ?? null;
+}
+
+function getJourneyProgress(timelineFeed: TimelineFeedItem[]) {
+  const total = timelineFeed.length;
+
+  if (total === 0) {
+    return {
+      total,
+      completed: 0,
+      percent: 0,
+      upcoming: 0,
+    };
+  }
+
+  const completed = timelineFeed.filter((item) => item.isCompleted).length;
+  const upcoming = timelineFeed.filter((item) => item.isFuture).length;
+  const percent = Math.round((completed / total) * 100);
+
+  return {
+    total,
+    completed,
+    percent,
+    upcoming,
+  };
 }
 
 async function uploadEpisodeDocument(
@@ -438,70 +663,23 @@ export default function EpisodeDetailsPage() {
 
   const timelineFeed = useMemo(() => {
     if (!timeline) return [] as TimelineFeedItem[];
-
-    const appointments: TimelineFeedItem[] = timeline.appointments.map(
-      (item) => ({
-        kind: "appointment",
-        id: `appointment-${item.id}`,
-        sortAt: item.start_time,
-        title: appointmentTitle(item),
-        subtitle: `${appointmentSubtitle(item)} • ${formatDateTime(
-          item.start_time,
-        )}`,
-        status: item.status,
-        href: `/appointments/${item.id}`,
-      }),
-    );
-
-    const notes: TimelineFeedItem[] = timeline.notes.map((item) => ({
-      kind: "note",
-      id: `note-${item.id}`,
-      sortAt: item.created_at,
-      title: "Notă de coordonare",
-      subtitle: item.text || "Fără conținut",
-      status: undefined,
-    }));
-
-    const tasks: TimelineFeedItem[] = timeline.tasks.map((item) => ({
-      kind: "task",
-      id: `task-${item.id}`,
-      sortAt: item.due_at,
-      title: item.title || `Sarcină #${item.id}`,
-      subtitle: item.assigned_to_role
-        ? `Rol: ${item.assigned_to_role}`
-        : "Fără rol atribuit",
-      status: item.status,
-    }));
-
-    const documents: TimelineFeedItem[] = timeline.documents.map((item) => ({
-      kind: "document",
-      id: `document-${item.id}`,
-      sortAt: item.created_at,
-      title: item.title || item.file_name || `Document #${item.id}`,
-      subtitle: item.appointment_id
-        ? `PDF atașat programării #${item.appointment_id}`
-        : "PDF atașat episodului",
-      status: undefined,
-      documentId: item.id,
-    }));
-
-    const referrals: TimelineFeedItem[] = timeline.referrals.map((item) => ({
-      kind: "referral",
-      id: `referral-${item.id}`,
-      sortAt: item.created_at,
-      title: "Trimitere către alt furnizor",
-      subtitle: item.reason || "Element de coordonare între furnizori",
-      status: item.status,
-    }));
-
-    return sortDescByDate<TimelineFeedItem>([
-      ...appointments,
-      ...documents,
-      ...notes,
-      ...tasks,
-      ...referrals,
-    ]);
+    return buildTimelineFeed(timeline);
   }, [timeline]);
+
+  const timelineGroups = useMemo(
+    () => groupTimelineByDate(timelineFeed),
+    [timelineFeed],
+  );
+
+  const latestEvent = useMemo(
+    () => getLatestEvent(timelineFeed),
+    [timelineFeed],
+  );
+
+  const journeyProgress = useMemo(
+    () => getJourneyProgress(timelineFeed),
+    [timelineFeed],
+  );
 
   return (
     <div className="mc-page-shell">
@@ -608,9 +786,9 @@ export default function EpisodeDetailsPage() {
           )}
 
           <p>
-            Vedere de coordonare pentru acest episod: programări, fișiere PDF,
-            note și sarcini. Documentele sunt păstrate ca fișiere atașate, fără
-            interpretare automată.
+            Journey 2.0 afișează obiectiv istoricul episodului: programări,
+            documente, note, sarcini și trimiteri. MediCalend nu interpretează
+            automat documentele și nu prezice pașii medicali următori.
           </p>
         </div>
 
@@ -624,59 +802,407 @@ export default function EpisodeDetailsPage() {
 
       {!loading && !error && timeline ? (
         <>
-          <section className="mc-stats-grid">
-            <Card className="mc-stat-card">
-              <div className="mc-stat-top">
-                <div>
-                  <p className="mc-stat-label">Programări</p>
-                  <p className="mc-stat-value">
-                    {timeline.appointments.length}
+          <section
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(280px, 380px) minmax(0, 1fr)",
+              gap: 18,
+              alignItems: "start",
+            }}
+          >
+            <div style={{ display: "grid", gap: 14 }}>
+              <Card
+                className="mc-stat-card"
+                style={{
+                  overflow: "hidden",
+                  background:
+                    "linear-gradient(135deg, rgba(37,99,235,0.12) 0%, rgba(255,255,255,0.98) 64%)",
+                }}
+              >
+                <CardContent style={{ padding: 20 }}>
+                  <div
+                    className="mc-page-badge"
+                    style={{ width: "fit-content" }}
+                  >
+                    <GitBranch size={16} style={{ marginRight: 8 }} />
+                    Patient Journey
+                  </div>
+
+                  <h3 style={{ margin: "16px 0 4px", fontSize: 24 }}>
+                    {timeline.episode.title}
+                  </h3>
+
+                  <span className={getStatusClass(timeline.episode.status)}>
+                    {getStatusLabel(timeline.episode.status)}
+                  </span>
+
+                  <div style={{ display: "grid", gap: 12, marginTop: 18 }}>
+                    <div
+                      className="mc-list-item"
+                      style={{ background: "#fff" }}
+                    >
+                      <strong>ID pacient</strong>
+                      <span>{timeline.episode.patient_id}</span>
+                    </div>
+
+                    <div
+                      className="mc-list-item"
+                      style={{ background: "#fff" }}
+                    >
+                      <strong>Început episod</strong>
+                      <span>{formatDateTime(timeline.episode.created_at)}</span>
+                    </div>
+
+                    <div
+                      className="mc-list-item"
+                      style={{ background: "#fff" }}
+                    >
+                      <strong>Ultimul eveniment</strong>
+                      <span>
+                        {latestEvent
+                          ? `${eventLabel(latestEvent.kind)} • ${latestEvent.title}`
+                          : "Nu există evenimente încă"}
+                      </span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Progress Journey</CardTitle>
+                  <CardDescription>
+                    Progres obiectiv calculat doar din evenimente existente.
+                  </CardDescription>
+                </CardHeader>
+
+                <CardContent>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      alignItems: "center",
+                    }}
+                  >
+                    <div>
+                      <strong style={{ fontSize: 28 }}>
+                        {journeyProgress.percent}%
+                      </strong>
+                      <p
+                        style={{
+                          margin: "4px 0 0",
+                          color: "var(--mc-muted)",
+                          fontSize: 13,
+                        }}
+                      >
+                        {journeyProgress.completed} finalizate din{" "}
+                        {journeyProgress.total} evenimente
+                      </p>
+                    </div>
+
+                    <div className="mc-icon-badge">
+                      <Stethoscope size={20} />
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      height: 10,
+                      borderRadius: 999,
+                      background: "rgba(148,163,184,0.22)",
+                      overflow: "hidden",
+                      marginTop: 16,
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: `${journeyProgress.percent}%`,
+                        height: "100%",
+                        borderRadius: 999,
+                        background:
+                          "linear-gradient(90deg, #2563EB 0%, #22C55E 100%)",
+                      }}
+                    />
+                  </div>
+
+                  <div
+                    className="mc-status-row"
+                    style={{ marginTop: 16, gridTemplateColumns: "1fr" }}
+                  >
+                    <div className="mc-status-item">
+                      <div className="mc-status-text">
+                        <strong>Evenimente viitoare înregistrate</strong>
+                        <span>{journeyProgress.upcoming}</span>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Statistici episod</CardTitle>
+                  <CardDescription>
+                    Date rapide pentru coordonare.
+                  </CardDescription>
+                </CardHeader>
+
+                <CardContent>
+                  <div className="mc-status-row">
+                    <div className="mc-status-item">
+                      <div className="mc-status-text">
+                        <strong>Programări</strong>
+                        <span>{timeline.appointments.length}</span>
+                      </div>
+                      <CalendarDays size={18} />
+                    </div>
+
+                    <div className="mc-status-item">
+                      <div className="mc-status-text">
+                        <strong>PDF-uri</strong>
+                        <span>{timeline.documents.length}</span>
+                      </div>
+                      <Paperclip size={18} />
+                    </div>
+
+                    <div className="mc-status-item">
+                      <div className="mc-status-text">
+                        <strong>Note</strong>
+                        <span>{timeline.notes.length}</span>
+                      </div>
+                      <MessageSquare size={18} />
+                    </div>
+
+                    <div className="mc-status-item">
+                      <div className="mc-status-text">
+                        <strong>Sarcini</strong>
+                        <span>{timeline.tasks.length}</span>
+                      </div>
+                      <ClipboardList size={18} />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Timeline vizual</CardTitle>
+                <CardDescription>
+                  Evenimente grupate pe date, cu iconițe, status și acțiuni
+                  rapide.
+                </CardDescription>
+              </CardHeader>
+
+              <CardContent>
+                {timelineGroups.length === 0 ? (
+                  <p className="mc-empty-note">
+                    Nu există încă elemente în timeline.
                   </p>
-                </div>
-                <div className="mc-icon-badge">
-                  <CalendarDays size={20} />
-                </div>
-              </div>
-            </Card>
+                ) : (
+                  <div style={{ display: "grid", gap: 22 }}>
+                    {timelineGroups.map((group) => (
+                      <div key={group.key}>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 12,
+                            marginBottom: 12,
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: 12,
+                              height: 12,
+                              borderRadius: 999,
+                              background: "var(--mc-primary)",
+                              boxShadow: "0 0 0 6px rgba(37,99,235,0.10)",
+                            }}
+                          />
+                          <h3
+                            style={{
+                              margin: 0,
+                              fontSize: 18,
+                              color: "var(--mc-text)",
+                            }}
+                          >
+                            {group.label}
+                          </h3>
+                          <div
+                            style={{
+                              height: 1,
+                              flex: 1,
+                              background: "var(--mc-border)",
+                            }}
+                          />
+                        </div>
 
-            <Card className="mc-stat-card">
-              <div className="mc-stat-top">
-                <div>
-                  <p className="mc-stat-label">PDF-uri</p>
-                  <p className="mc-stat-value">{timeline.documents.length}</p>
-                </div>
-                <div className="mc-icon-badge">
-                  <Paperclip size={20} />
-                </div>
-              </div>
-            </Card>
+                        <div
+                          style={{
+                            display: "grid",
+                            gap: 12,
+                            paddingLeft: 5,
+                            borderLeft: "2px solid var(--mc-border)",
+                          }}
+                        >
+                          {group.items.map((item) => (
+                            <div
+                              key={item.id}
+                              style={{
+                                position: "relative",
+                                marginLeft: 16,
+                              }}
+                            >
+                              <div
+                                style={{
+                                  position: "absolute",
+                                  left: -24,
+                                  top: 22,
+                                  width: 14,
+                                  height: 14,
+                                  borderRadius: 999,
+                                  background: eventAccent(item.kind),
+                                  border: "3px solid white",
+                                  boxShadow: `0 0 0 4px ${eventSoftBg(
+                                    item.kind,
+                                  )}`,
+                                }}
+                              />
 
-            <Card className="mc-stat-card">
-              <div className="mc-stat-top">
-                <div>
-                  <p className="mc-stat-label">Note</p>
-                  <p className="mc-stat-value">{timeline.notes.length}</p>
-                </div>
-                <div className="mc-icon-badge">
-                  <MessageSquare size={20} />
-                </div>
-              </div>
-            </Card>
+                              <div
+                                className="mc-list-item"
+                                style={{
+                                  background:
+                                    item.isFuture && item.kind === "appointment"
+                                      ? "linear-gradient(135deg, rgba(37,99,235,0.08), #fff)"
+                                      : "#fff",
+                                  borderLeft: `4px solid ${eventAccent(
+                                    item.kind,
+                                  )}`,
+                                  transition:
+                                    "transform 160ms ease, box-shadow 160ms ease",
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    gap: 12,
+                                    flexWrap: "wrap",
+                                  }}
+                                >
+                                  <div style={{ minWidth: 0 }}>
+                                    <div
+                                      style={{
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        gap: 8,
+                                        padding: "6px 10px",
+                                        borderRadius: 999,
+                                        background: eventSoftBg(item.kind),
+                                        color: eventAccent(item.kind),
+                                        fontWeight: 900,
+                                        fontSize: 12,
+                                        marginBottom: 10,
+                                      }}
+                                    >
+                                      {eventIcon(item.kind)}
+                                      {eventLabel(item.kind)}
+                                    </div>
 
-            <Card className="mc-stat-card">
-              <div className="mc-stat-top">
-                <div>
-                  <p className="mc-stat-label">Sarcini</p>
-                  <p className="mc-stat-value">{timeline.tasks.length}</p>
-                </div>
-                <div className="mc-icon-badge">
-                  <ClipboardList size={20} />
-                </div>
-              </div>
+                                    <strong
+                                      style={{
+                                        display: "block",
+                                        fontSize: 17,
+                                      }}
+                                    >
+                                      {item.title}
+                                    </strong>
+
+                                    <span
+                                      style={{
+                                        display: "block",
+                                        marginTop: 5,
+                                        color: "var(--mc-muted)",
+                                        lineHeight: 1.55,
+                                      }}
+                                    >
+                                      {item.subtitle}
+                                    </span>
+
+                                    <span
+                                      style={{
+                                        display: "block",
+                                        marginTop: 8,
+                                        fontWeight: 800,
+                                        color: "var(--mc-text)",
+                                      }}
+                                    >
+                                      {item.eventTimeLabel ||
+                                        "Oră nespecificată"}
+                                    </span>
+                                  </div>
+
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      gap: 8,
+                                      alignItems: "flex-start",
+                                      flexWrap: "wrap",
+                                    }}
+                                  >
+                                    {item.isFuture ? (
+                                      <span className="mc-pill mc-pill-warning">
+                                        Viitor
+                                      </span>
+                                    ) : null}
+
+                                    {item.status ? (
+                                      <span
+                                        className={getStatusClass(item.status)}
+                                      >
+                                        {getStatusLabel(item.status)}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                </div>
+
+                                {item.kind === "appointment" && item.href ? (
+                                  <div style={{ marginTop: 12 }}>
+                                    <Link href={item.href}>
+                                      <Button variant="secondary">
+                                        Deschide programarea
+                                      </Button>
+                                    </Link>
+                                  </div>
+                                ) : null}
+
+                                {item.kind === "document" ? (
+                                  <div style={{ marginTop: 12 }}>
+                                    <Link
+                                      href={`/documents/${item.documentId}`}
+                                    >
+                                      <Button variant="secondary">
+                                        Vezi documentul
+                                      </Button>
+                                    </Link>
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
             </Card>
           </section>
 
-          <section className="mc-dashboard-grid">
+          <section className="mc-dashboard-grid" style={{ marginTop: 18 }}>
             <Card>
               <CardHeader>
                 <CardTitle>Detalii episod</CardTitle>
@@ -790,74 +1316,6 @@ export default function EpisodeDetailsPage() {
               </CardContent>
             </Card>
           </section>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Timeline vizual</CardTitle>
-              <CardDescription>
-                Evenimentele episodului sunt afișate cronologic, de la cele mai
-                recente la cele mai vechi.
-              </CardDescription>
-            </CardHeader>
-
-            <CardContent>
-              {timelineFeed.length === 0 ? (
-                <p className="mc-empty-note">
-                  Nu există încă elemente în timeline.
-                </p>
-              ) : (
-                <div className="mc-timeline-feed">
-                  {timelineFeed.map((item) => (
-                    <div key={item.id} className="mc-timeline-item">
-                      <div className="mc-timeline-dot" />
-                      <div className="mc-timeline-content">
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            gap: 12,
-                            flexWrap: "wrap",
-                          }}
-                        >
-                          <div>
-                            <strong>{item.title}</strong>
-                            <span>{item.subtitle}</span>
-                            <span>{formatDateTime(item.sortAt)}</span>
-                          </div>
-
-                          {item.status ? (
-                            <span className={getStatusClass(item.status)}>
-                              {getStatusLabel(item.status)}
-                            </span>
-                          ) : null}
-                        </div>
-
-                        {item.kind === "appointment" && item.href ? (
-                          <div style={{ marginTop: 10 }}>
-                            <Link href={item.href}>
-                              <Button variant="secondary">
-                                Deschide programarea
-                              </Button>
-                            </Link>
-                          </div>
-                        ) : null}
-
-                        {item.kind === "document" ? (
-                          <div style={{ marginTop: 10 }}>
-                            <Link href={`/documents/${item.documentId}`}>
-                              <Button variant="secondary">
-                                Vezi documentul
-                              </Button>
-                            </Link>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
 
           <section className="mc-dashboard-grid">
             <Card>
@@ -973,7 +1431,6 @@ export default function EpisodeDetailsPage() {
                   <label className="mc-label" htmlFor="new-note">
                     Notă nouă
                   </label>
-
                   <textarea
                     id="new-note"
                     className="mc-input"
