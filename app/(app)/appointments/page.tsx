@@ -9,6 +9,7 @@ import {
   Clock3,
   FileText,
   Search,
+  Trash2,
   UserRound,
 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
@@ -44,7 +45,8 @@ type StatusFilter =
   | "scheduled"
   | "in_progress"
   | "completed"
-  | "pending";
+  | "pending"
+  | "canceled";
 
 function formatDateTime(value?: string | null) {
   if (!value) return "Nespecificat";
@@ -55,7 +57,6 @@ function formatDateTime(value?: string | null) {
   if (!match) return raw;
 
   const [, year, month, day, hour, minute] = match;
-
   return `${day}.${month}.${year}, ${hour}:${minute}`;
 }
 
@@ -66,7 +67,19 @@ function getStatusClass(status?: string) {
   if (status === "pending" || status === "in_progress") {
     return "mc-pill mc-pill-warning";
   }
+  if (status === "canceled") {
+    return "mc-pill mc-pill-danger";
+  }
   return "mc-pill mc-pill-neutral";
+}
+
+function appointmentStatusLabel(status?: string) {
+  if (status === "scheduled") return "Programată";
+  if (status === "in_progress") return "În desfășurare";
+  if (status === "completed") return "Finalizată";
+  if (status === "pending") return "În așteptare";
+  if (status === "canceled") return "Anulată";
+  return status || "Necunoscut";
 }
 
 function statusLabel(value: StatusFilter) {
@@ -75,6 +88,7 @@ function statusLabel(value: StatusFilter) {
   if (value === "in_progress") return "În desfășurare";
   if (value === "completed") return "Finalizate";
   if (value === "pending") return "Pending";
+  if (value === "canceled") return "Anulate";
   return value;
 }
 
@@ -115,31 +129,62 @@ export default function AppointmentsPage() {
   const [query, setQuery] = useState("");
   const [appliedQuery, setAppliedQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  async function loadAppointments() {
+    try {
+      setLoading(true);
+      setError("");
+
+      const token = getToken();
+      const data = await apiRequest<AppointmentRow[]>("/appointments/", {
+        token,
+      });
+      setRows(data ?? []);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Nu am putut încărca programările.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    async function load() {
-      try {
-        setLoading(true);
-        setError("");
-
-        const token = getToken();
-        const data = await apiRequest<AppointmentRow[]>("/appointments/", {
-          token,
-        });
-        setRows(data ?? []);
-      } catch (err) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Nu am putut încărca programările.",
-        );
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    void load();
+    void loadAppointments();
   }, []);
+
+  async function handleDeleteAppointment(id: number) {
+    const confirmed = window.confirm(
+      "Ștergi definitiv această programare anulată?",
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setDeletingId(id);
+      setError("");
+
+      const token = getToken();
+
+      await apiRequest(`/appointments/${id}`, {
+        method: "DELETE",
+        token,
+      });
+
+      setRows((prev) => prev.filter((item) => item.id !== id));
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Programarea nu a putut fi ștearsă.",
+      );
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   const stats = useMemo(() => {
     const now = Date.now();
@@ -434,6 +479,7 @@ export default function AppointmentsPage() {
                     "in_progress",
                     "completed",
                     "pending",
+                    "canceled",
                   ] as StatusFilter[]
                 ).map((value) => (
                   <button
@@ -526,59 +572,50 @@ export default function AppointmentsPage() {
           {!loading && !error && filteredRows.length > 0 ? (
             <div className="mc-list">
               {filteredRows.map((item) => (
-                <Link
-                  key={item.id}
-                  href={`/appointments/${item.id}`}
-                  className="mc-list-item"
-                  style={{ display: "block" }}
-                >
-                  <div
+                <div key={item.id} className="mc-list-item">
+                  <Link
+                    href={`/appointments/${item.id}`}
                     style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 12,
-                      flexWrap: "wrap",
+                      display: "block",
+                      color: "inherit",
+                      textDecoration: "none",
                     }}
                   >
-                    <div>
-                      <strong>
-                        {item.patient_name ||
-                          `Pacient #${item.patient_id ?? item.id}`}
-                      </strong>
-                      <span>
-                        {item.doctor_name ||
-                          item.provider_name ||
-                          "Furnizor medical"}
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: 12,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <div>
+                        <strong>
+                          {item.patient_name ||
+                            `Pacient #${item.patient_id ?? item.id}`}
+                        </strong>
+                        <span>
+                          {item.doctor_name ||
+                            item.provider_name ||
+                            "Furnizor medical"}
+                        </span>
+                      </div>
+
+                      <span className={getStatusClass(item.status)}>
+                        {appointmentStatusLabel(item.status)}
                       </span>
                     </div>
 
-                    <span className={getStatusClass(item.status)}>
-                      {item.status || "necunoscut"}
-                    </span>
-                  </div>
-
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 14,
-                      flexWrap: "wrap",
-                      color: "var(--mc-muted)",
-                      fontSize: 14,
-                      marginTop: 8,
-                    }}
-                  >
-                    <span
+                    <div
                       style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 6,
+                        display: "flex",
+                        gap: 14,
+                        flexWrap: "wrap",
+                        color: "var(--mc-muted)",
+                        fontSize: 14,
+                        marginTop: 8,
                       }}
                     >
-                      <CalendarDays size={15} />
-                      {formatDateTime(item.start_time)}
-                    </span>
-
-                    {item.end_time ? (
                       <span
                         style={{
                           display: "inline-flex",
@@ -586,41 +623,84 @@ export default function AppointmentsPage() {
                           gap: 6,
                         }}
                       >
-                        <Clock3 size={15} />
-                        până la {formatDateTime(item.end_time)}
+                        <CalendarDays size={15} />
+                        {formatDateTime(item.start_time)}
                       </span>
+
+                      {item.end_time ? (
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                          }}
+                        >
+                          <Clock3 size={15} />
+                          până la {formatDateTime(item.end_time)}
+                        </span>
+                      ) : null}
+
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                        }}
+                      >
+                        <UserRound size={15} />
+                        episod: {item.episode_id ?? "—"}
+                      </span>
+                    </div>
+
+                    {item.notes ? (
+                      <span style={{ marginTop: 8 }}>{item.notes}</span>
                     ) : null}
-
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 6,
-                      }}
-                    >
-                      <UserRound size={15} />
-                      episod: {item.episode_id ?? "—"}
-                    </span>
-                  </div>
-
-                  {item.notes ? (
-                    <span style={{ marginTop: 8 }}>{item.notes}</span>
-                  ) : null}
+                  </Link>
 
                   <div
                     style={{
-                      marginTop: 10,
-                      display: "inline-flex",
+                      marginTop: 12,
+                      display: "flex",
                       alignItems: "center",
-                      gap: 8,
-                      color: "var(--mc-primary)",
-                      fontWeight: 700,
+                      gap: 10,
+                      flexWrap: "wrap",
                     }}
                   >
-                    Deschide programarea
-                    <ArrowRight size={16} />
+                    <Link href={`/appointments/${item.id}`}>
+                      <Button variant="secondary">
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 8,
+                          }}
+                        >
+                          Deschide programarea
+                          <ArrowRight size={16} />
+                        </span>
+                      </Button>
+                    </Link>
+
+                    {item.status === "canceled" ? (
+                      <Button
+                        variant="danger"
+                        onClick={() => handleDeleteAppointment(item.id)}
+                        disabled={deletingId === item.id}
+                      >
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 8,
+                          }}
+                        >
+                          <Trash2 size={16} />
+                          {deletingId === item.id ? "Se șterge..." : "Șterge"}
+                        </span>
+                      </Button>
+                    ) : null}
                   </div>
-                </Link>
+                </div>
               ))}
             </div>
           ) : null}
