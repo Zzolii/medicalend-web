@@ -94,13 +94,26 @@ function normalizeApiErrorMessage(
 }
 
 async function parseResponse(response: Response) {
-  const contentType = response.headers.get("content-type") || "";
-
-  if (contentType.includes("application/json")) {
-    return response.json();
+  if (response.status === 204) {
+    return null;
   }
 
   const text = await response.text();
+
+  if (!text.trim()) {
+    return null;
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+
+  if (contentType.includes("application/json")) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
+  }
+
   return text;
 }
 
