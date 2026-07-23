@@ -2,6 +2,7 @@
 
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import ServiceWorkerRegister from "./service-worker-register";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://app.medicalend.ro"),
@@ -78,7 +79,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ro">
-      <body>{children}</body>
+      <body>
+        <ServiceWorkerRegister />
+        {children}
+      </body>
     </html>
   );
 }
