@@ -8,28 +8,29 @@ import {
   Activity,
   ArrowLeft,
   CalendarDays,
+  ChevronDown,
+  ChevronRight,
+  CircleDot,
   FileText,
   GitBranch,
+  Mail,
   MapPin,
   Paperclip,
   Pencil,
+  Phone,
+  Plus,
   Save,
   Upload,
   User,
   X,
 } from "lucide-react";
+
 import { apiRequest } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 import { useAppUser } from "@/components/user-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 
 type PatientDetails = {
   id: number;
@@ -54,9 +55,9 @@ type JourneyAppointment = {
   provider_name?: string | null;
   doctor_id?: number | null;
   doctor_name?: string | null;
-  start_time?: string;
+  start_time?: string | null;
   end_time?: string | null;
-  status?: string;
+  status?: string | null;
   notes?: string | null;
 };
 
@@ -67,17 +68,17 @@ type JourneyReferral = {
   to_provider_id: number;
   to_provider_name?: string | null;
   reason?: string | null;
-  status?: string;
-  created_at?: string;
+  status?: string | null;
+  created_at?: string | null;
 };
 
 type JourneyEpisode = {
   id: number;
-  title?: string;
-  status?: string;
+  title?: string | null;
+  status?: string | null;
   owner_provider_id: number;
   owner_provider_name?: string | null;
-  created_at?: string;
+  created_at?: string | null;
   appointments: JourneyAppointment[];
   referrals: JourneyReferral[];
 };
@@ -111,41 +112,95 @@ type EpisodeGroup = {
   referrals: JourneyReferral[];
   episodeDocuments: TimelineDocument[];
   documentsByAppointment: Record<number, TimelineDocument[]>;
+  documentCount: number;
 };
 
 const LAST_JOURNEY_PATIENT_KEY = "medicalend_last_journey_patient_id";
 
-function formatDate(value?: string | null) {
-  if (!value) return "Nespecificat";
+function parseDate(value?: string | null) {
+  if (!value) return null;
+
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleDateString("ro-RO");
+
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function formatDate(value?: string | null) {
+  const parsed = parseDate(value);
+
+  if (!parsed) {
+    return "Nespecificat";
+  }
+
+  return parsed.toLocaleDateString("ro-RO", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  });
 }
 
 function formatDateTime(value?: string | null) {
-  if (!value) return "Nespecificat";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
+  const parsed = parseDate(value);
+
+  if (!parsed) {
+    return "Nespecificat";
+  }
+
   return parsed.toLocaleString("ro-RO", {
-    dateStyle: "short",
-    timeStyle: "short",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatTime(value?: string | null) {
+  const parsed = parseDate(value);
+
+  if (!parsed) {
+    return "--:--";
+  }
+
+  return parsed.toLocaleTimeString("ro-RO", {
+    hour: "2-digit",
+    minute: "2-digit",
   });
 }
 
 function statusLabel(value?: string | null) {
-  if (!value) return "Necunoscut";
-  if (value === "open") return "Deschis";
-  if (value === "active") return "Activ";
-  if (value === "in_progress") return "În desfășurare";
-  if (value === "closed") return "Închis";
-  if (value === "completed") return "Finalizat";
-  if (value === "archived") return "Arhivat";
-  if (value === "scheduled") return "Programată";
-  if (value === "pending") return "În așteptare";
-  if (value === "accepted") return "Acceptată";
-  if (value === "rejected") return "Respinsă";
-  if (value === "canceled") return "Anulată";
-  return value;
+  switch (value) {
+    case "open":
+      return "Deschis";
+    case "active":
+      return "Activ";
+    case "in_progress":
+      return "În desfășurare";
+    case "closed":
+      return "Închis";
+    case "completed":
+      return "Finalizat";
+    case "archived":
+      return "Arhivat";
+    case "scheduled":
+      return "Programată";
+    case "pending":
+      return "În așteptare";
+    case "accepted":
+      return "Acceptată";
+    case "rejected":
+      return "Respinsă";
+    case "canceled":
+      return "Anulată";
+    case "no_show":
+      return "Neprezentat";
+    default:
+      return value || "Necunoscut";
+  }
 }
 
 function statusClass(value?: string | null) {
@@ -167,36 +222,45 @@ function statusClass(value?: string | null) {
 }
 
 function sortDesc<
-  T extends { created_at?: string | null; start_time?: string | null },
+  T extends {
+    created_at?: string | null;
+    start_time?: string | null;
+  },
 >(rows: T[]) {
   return [...rows].sort((a, b) => {
     const aValue = a.start_time || a.created_at;
     const bValue = b.start_time || b.created_at;
+
     const aTime = aValue ? new Date(aValue).getTime() : 0;
     const bTime = bValue ? new Date(bValue).getTime() : 0;
+
     return bTime - aTime;
   });
 }
 
 function appointmentTitle(item: JourneyAppointment) {
-  if (item.notes?.trim()) return item.notes.trim();
+  if (item.notes?.trim()) {
+    return item.notes.trim();
+  }
+
   return "Consultație medicală";
 }
 
 function appointmentSubtitle(item: JourneyAppointment) {
-  if (item.doctor_name?.trim() && item.provider_name?.trim()) {
-    return `${item.doctor_name.trim()} • ${item.provider_name.trim()}`;
+  const doctor = item.doctor_name?.trim();
+  const provider = item.provider_name?.trim();
+
+  if (doctor && provider) {
+    return `${doctor} • ${provider}`;
   }
 
-  if (item.doctor_name?.trim()) return item.doctor_name.trim();
-  if (item.provider_name?.trim()) return item.provider_name.trim();
-
-  return "Clinică / specialist";
+  return doctor || provider || "Clinică / specialist";
 }
 
 function referralTitle(item: JourneyReferral) {
   const fromName =
     item.from_provider_name?.trim() || `Furnizor #${item.from_provider_id}`;
+
   const toName =
     item.to_provider_name?.trim() || `Furnizor #${item.to_provider_id}`;
 
@@ -204,9 +268,17 @@ function referralTitle(item: JourneyReferral) {
 }
 
 function documentTitle(item: TimelineDocument) {
-  return (
-    item.title?.trim() || item.file_name?.trim() || `Document PDF #${item.id}`
-  );
+  return item.title?.trim() || item.file_name?.trim() || `Document #${item.id}`;
+}
+
+function episodeFallbackTitle(episode: JourneyEpisode) {
+  return episode.title?.trim() || "Episod medical";
+}
+
+function episodeYear(episode: JourneyEpisode) {
+  const parsed = parseDate(episode.created_at);
+
+  return parsed ? String(parsed.getFullYear()) : "Fără dată";
 }
 
 async function uploadEpisodeDocument(
@@ -216,6 +288,7 @@ async function uploadEpisodeDocument(
   title?: string,
 ) {
   const formData = new FormData();
+
   formData.append("file", file);
   formData.append("episode_id", String(episodeId));
 
@@ -230,7 +303,11 @@ async function uploadEpisodeDocument(
 
   const response = await fetch(`${apiBase}/documents/upload`, {
     method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    headers: token
+      ? {
+          Authorization: `Bearer ${token}`,
+        }
+      : undefined,
     body: formData,
   });
 
@@ -239,10 +316,13 @@ async function uploadEpisodeDocument(
 
     try {
       const data = await response.json();
+
       if (typeof data?.detail === "string" && data.detail.trim()) {
         message = data.detail;
       }
-    } catch {}
+    } catch {
+      // Răspunsul nu conține JSON valid.
+    }
 
     throw new Error(message);
   }
@@ -268,9 +348,15 @@ async function updateEpisodeTitle(
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(token
+        ? {
+            Authorization: `Bearer ${token}`,
+          }
+        : {}),
     },
-    body: JSON.stringify({ title }),
+    body: JSON.stringify({
+      title,
+    }),
   });
 
   if (!response.ok) {
@@ -278,10 +364,13 @@ async function updateEpisodeTitle(
 
     try {
       const data = await response.json();
+
       if (typeof data?.detail === "string" && data.detail.trim()) {
         message = data.detail;
       }
-    } catch {}
+    } catch {
+      // Răspunsul nu conține JSON valid.
+    }
 
     throw new Error(message);
   }
@@ -297,16 +386,28 @@ export default function PatientJourneyPage() {
 
   const [patient, setPatient] = useState<PatientDetails | null>(null);
   const [journey, setJourney] = useState<PatientJourneyResponse | null>(null);
+
   const [documentsByEpisode, setDocumentsByEpisode] = useState<
     Record<number, TimelineDocument[]>
   >({});
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  const [expandedEpisodeIds, setExpandedEpisodeIds] = useState<
+    Record<number, boolean>
+  >({});
+
+  const [openUploadEpisodeId, setOpenUploadEpisodeId] = useState<number | null>(
+    null,
+  );
+
   const [editingEpisodeId, setEditingEpisodeId] = useState<number | null>(null);
+
   const [episodeTitleDraftById, setEpisodeTitleDraftById] = useState<
     Record<number, string>
   >({});
+
   const [savingEpisodeTitleId, setSavingEpisodeTitleId] = useState<
     number | null
   >(null);
@@ -314,9 +415,11 @@ export default function PatientJourneyPage() {
   const [uploadTitleByEpisode, setUploadTitleByEpisode] = useState<
     Record<number, string>
   >({});
+
   const [uploadFileByEpisode, setUploadFileByEpisode] = useState<
     Record<number, File | null>
   >({});
+
   const [uploadingEpisodeId, setUploadingEpisodeId] = useState<number | null>(
     null,
   );
@@ -334,21 +437,27 @@ export default function PatientJourneyPage() {
     clinicRole === "assistant" ||
     clinicRole === "clinic_admin";
 
-  const loadData = async (currentPatientId: string) => {
+  async function loadData(currentPatientId: string) {
     const [patientData, journeyData] = await Promise.all([
-      apiRequest<PatientDetails>(`/patients/${currentPatientId}`, { token }),
+      apiRequest<PatientDetails>(`/patients/${currentPatientId}`, {
+        token,
+      }),
       apiRequest<PatientJourneyResponse>(
         `/patients/${currentPatientId}/journey`,
-        { token },
+        {
+          token,
+        },
       ),
     ]);
 
-    const episodeDocumentsPairs = await Promise.all(
+    const episodeDocumentPairs = await Promise.all(
       (journeyData.episodes ?? []).map(async (episode) => {
         try {
           const timeline = await apiRequest<EpisodeTimeline>(
             `/care-episodes/${episode.id}/timeline`,
-            { token },
+            {
+              token,
+            },
           );
 
           return [episode.id, timeline.documents ?? []] as const;
@@ -360,7 +469,7 @@ export default function PatientJourneyPage() {
 
     const nextDocumentsByEpisode: Record<number, TimelineDocument[]> = {};
 
-    for (const [episodeId, documents] of episodeDocumentsPairs) {
+    for (const [episodeId, documents] of episodeDocumentPairs) {
       nextDocumentsByEpisode[episodeId] = documents;
     }
 
@@ -369,10 +478,25 @@ export default function PatientJourneyPage() {
       journeyData,
       nextDocumentsByEpisode,
     };
-  };
+  }
+
+  async function refreshData() {
+    if (!patientId) {
+      return;
+    }
+
+    const data = await loadData(patientId);
+
+    setPatient(data.patientData);
+    setJourney(data.journeyData);
+    setDocumentsByEpisode(data.nextDocumentsByEpisode);
+  }
 
   useEffect(() => {
-    if (!patientId || typeof window === "undefined") return;
+    if (!patientId || typeof window === "undefined") {
+      return;
+    }
+
     localStorage.setItem(LAST_JOURNEY_PATIENT_KEY, String(patientId));
   }, [patientId]);
 
@@ -385,6 +509,7 @@ export default function PatientJourneyPage() {
           setError("ID-ul pacientului lipsește.");
           setLoading(false);
         }
+
         return;
       }
 
@@ -394,18 +519,30 @@ export default function PatientJourneyPage() {
 
         const data = await loadData(patientId);
 
-        if (!mounted) return;
+        if (!mounted) {
+          return;
+        }
 
         setPatient(data.patientData);
         setJourney(data.journeyData);
         setDocumentsByEpisode(data.nextDocumentsByEpisode);
+
+        const firstEpisodeId = data.journeyData.episodes?.[0]?.id;
+
+        if (firstEpisodeId) {
+          setExpandedEpisodeIds({
+            [firstEpisodeId]: true,
+          });
+        }
       } catch (err) {
-        if (!mounted) return;
+        if (!mounted) {
+          return;
+        }
 
         setError(
           err instanceof Error
             ? err.message
-            : "Nu am putut încărca Journey-ul pacientului.",
+            : "Nu am putut încărca parcursul pacientului.",
         );
       } finally {
         if (mounted) {
@@ -451,7 +588,9 @@ export default function PatientJourneyPage() {
   const groupedJourney = useMemo<EpisodeGroup[]>(() => {
     const groups = episodes.map((episode) => {
       const documents = documentsByEpisode[episode.id] ?? [];
+
       const documentsByAppointment: Record<number, TimelineDocument[]> = {};
+
       const episodeDocuments: TimelineDocument[] = [];
 
       for (const document of documents) {
@@ -459,6 +598,7 @@ export default function PatientJourneyPage() {
           if (!documentsByAppointment[document.appointment_id]) {
             documentsByAppointment[document.appointment_id] = [];
           }
+
           documentsByAppointment[document.appointment_id].push(document);
         } else {
           episodeDocuments.push(document);
@@ -471,6 +611,7 @@ export default function PatientJourneyPage() {
         referrals: sortDesc(episode.referrals ?? []),
         episodeDocuments: sortDesc(episodeDocuments),
         documentsByAppointment,
+        documentCount: documents.length,
       };
     });
 
@@ -478,45 +619,65 @@ export default function PatientJourneyPage() {
       const aTime = a.episode.created_at
         ? new Date(a.episode.created_at).getTime()
         : 0;
+
       const bTime = b.episode.created_at
         ? new Date(b.episode.created_at).getTime()
         : 0;
+
       return bTime - aTime;
     });
   }, [documentsByEpisode, episodes]);
 
-  const totalDocuments = useMemo(
-    () =>
-      Object.values(documentsByEpisode).reduce(
-        (sum, docs) => sum + docs.length,
-        0,
-      ),
-    [documentsByEpisode],
-  );
+  const groupedByYear = useMemo(() => {
+    const result: Record<string, EpisodeGroup[]> = {};
 
-  const totalAppointments = useMemo(
-    () =>
-      episodes.reduce(
-        (sum, episode) => sum + (episode.appointments?.length ?? 0),
-        0,
-      ),
-    [episodes],
-  );
+    for (const group of groupedJourney) {
+      const year = episodeYear(group.episode);
 
-  const totalReferrals = useMemo(
-    () =>
-      episodes.reduce(
-        (sum, episode) => sum + (episode.referrals?.length ?? 0),
-        0,
-      ),
-    [episodes],
-  );
+      if (!result[year]) {
+        result[year] = [];
+      }
+
+      result[year].push(group);
+    }
+
+    return result;
+  }, [groupedJourney]);
+
+  const totalDocuments = useMemo(() => {
+    return Object.values(documentsByEpisode).reduce(
+      (sum, documents) => sum + documents.length,
+      0,
+    );
+  }, [documentsByEpisode]);
+
+  const totalAppointments = useMemo(() => {
+    return episodes.reduce(
+      (sum, episode) => sum + (episode.appointments?.length ?? 0),
+      0,
+    );
+  }, [episodes]);
+
+  const totalReferrals = useMemo(() => {
+    return episodes.reduce(
+      (sum, episode) => sum + (episode.referrals?.length ?? 0),
+      0,
+    );
+  }, [episodes]);
+
+  function toggleEpisode(episodeId: number) {
+    setExpandedEpisodeIds((previous) => ({
+      ...previous,
+      [episodeId]: !previous[episodeId],
+    }));
+  }
 
   function startEditingEpisodeTitle(episode: JourneyEpisode) {
     setEditingEpisodeId(episode.id);
-    setEpisodeTitleDraftById((prev) => ({
-      ...prev,
-      [episode.id]: episode.title?.trim() || "",
+
+    setEpisodeTitleDraftById((previous) => ({
+      ...previous,
+      [episode.id]: episodeFallbackTitle(episode),
     }));
   }
 
@@ -538,13 +699,8 @@ export default function PatientJourneyPage() {
       setError("");
 
       await updateEpisodeTitle(episodeId, token, title);
+      await refreshData();
 
-      if (!patientId) return;
-
-      const data = await loadData(patientId);
-      setPatient(data.patientData);
-      setJourney(data.journeyData);
-      setDocumentsByEpisode(data.nextDocumentsByEpisode);
       setEditingEpisodeId(null);
     } catch (err) {
       setError(
@@ -572,21 +728,19 @@ export default function PatientJourneyPage() {
 
       await uploadEpisodeDocument(episodeId, token, file, title);
 
-      setUploadFileByEpisode((prev) => ({
-        ...prev,
+      setUploadFileByEpisode((previous) => ({
+        ...previous,
         [episodeId]: null,
       }));
-      setUploadTitleByEpisode((prev) => ({
-        ...prev,
+
+      setUploadTitleByEpisode((previous) => ({
+        ...previous,
         [episodeId]: "",
       }));
 
-      if (!patientId) return;
+      setOpenUploadEpisodeId(null);
 
-      const data = await loadData(patientId);
-      setPatient(data.patientData);
-      setJourney(data.journeyData);
-      setDocumentsByEpisode(data.nextDocumentsByEpisode);
+      await refreshData();
     } catch (err) {
       setError(
         err instanceof Error
@@ -600,724 +754,1042 @@ export default function PatientJourneyPage() {
 
   return (
     <div className="mc-page-shell">
-      <Card
-        className="mc-stat-card"
+      <section
         style={{
           overflow: "hidden",
+          border: "1px solid var(--mc-border)",
+          borderRadius: 24,
           background:
-            "linear-gradient(135deg, rgba(37,99,235,0.10) 0%, rgba(255,255,255,0.96) 58%)",
+            "linear-gradient(135deg, rgba(37,99,235,0.12) 0%, rgba(255,255,255,0.98) 62%)",
+          boxShadow: "0 18px 44px rgba(15, 23, 42, 0.06)",
         }}
       >
-        <CardContent style={{ padding: 24 }}>
-          <div
+        <div style={{ padding: 28 }}>
+          <Link
+            href={`/patients/${patientId}`}
             style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: 18,
-              flexWrap: "wrap",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              color: "var(--mc-primary)",
+              fontWeight: 700,
+              textDecoration: "none",
             }}
           >
-            <div style={{ maxWidth: 780 }}>
-              <div style={{ marginBottom: 14 }}>
-                <Link
-                  href={`/patients/${patientId}`}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 8,
-                    color: "var(--mc-primary)",
-                    fontWeight: 700,
-                  }}
-                >
-                  <ArrowLeft size={16} />
-                  Înapoi la profilul pacientului
-                </Link>
-              </div>
+            <ArrowLeft size={17} />
+            Înapoi la profil
+          </Link>
 
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+              gap: 28,
+              marginTop: 24,
+              alignItems: "center",
+            }}
+          >
+            <div>
               <div
                 className="mc-page-badge"
-                style={{ marginBottom: 14, width: "fit-content" }}
+                style={{
+                  width: "fit-content",
+                  marginBottom: 14,
+                }}
               >
                 <GitBranch size={16} style={{ marginRight: 8 }} />
-                Journey longitudinal
+                Parcursul pacientului
               </div>
 
-              <h2 style={{ margin: 0, fontSize: 32, lineHeight: 1.08 }}>
-                {fullName || `Pacient #${patientId}`}
-              </h2>
+              <h1
+                style={{
+                  margin: 0,
+                  fontSize: "clamp(30px, 4vw, 44px)",
+                  lineHeight: 1.04,
+                  letterSpacing: "-0.035em",
+                }}
+              >
+                {fullName || "Pacient"}
+              </h1>
 
               <p
                 style={{
                   margin: "14px 0 0",
+                  maxWidth: 720,
                   color: "var(--mc-muted)",
                   lineHeight: 1.7,
-                  maxWidth: 760,
                 }}
               >
-                Episoadele, programările, trimiterile și documentele atașate
-                sunt afișate într-o structură cronologică. Datele medicale sunt
-                afișate conform rolului și relației existente cu pacientul.
+                O vedere cronologică a episoadelor, consultațiilor, documentelor
+                și trimiterilor medicale.
               </p>
 
               <div
                 style={{
                   display: "flex",
-                  gap: 12,
-                  marginTop: 18,
+                  gap: 10,
                   flexWrap: "wrap",
+                  marginTop: 20,
                 }}
               >
                 <Link href={`/patients/${patientId}`}>
-                  <Button variant="secondary">Profil pacient</Button>
+                  <Button variant="secondary">
+                    <User size={16} />
+                    Profil pacient
+                  </Button>
                 </Link>
 
                 <Link href="/patients">
-                  <Button variant="ghost">Înapoi la pacienți</Button>
+                  <Button variant="ghost">Lista pacienților</Button>
                 </Link>
               </div>
             </div>
 
             <div
               style={{
-                minWidth: 280,
-                maxWidth: 360,
-                flex: 1,
                 display: "grid",
+                gridTemplateColumns: "repeat(2, minmax(120px, 1fr))",
                 gap: 12,
               }}
             >
-              <div className="mc-list-item" style={{ background: "white" }}>
-                <strong>ID pacient</strong>
-                <span>{patient?.id ?? patientId ?? "-"}</span>
-              </div>
+              {[
+                {
+                  label: "Episoade",
+                  value: episodes.length,
+                  icon: <Activity size={19} />,
+                },
+                {
+                  label: "Programări",
+                  value: totalAppointments,
+                  icon: <CalendarDays size={19} />,
+                },
+                {
+                  label: "Documente",
+                  value: totalDocuments,
+                  icon: <Paperclip size={19} />,
+                },
+                {
+                  label: "Trimiteri",
+                  value: totalReferrals,
+                  icon: <GitBranch size={19} />,
+                },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  style={{
+                    padding: 16,
+                    border: "1px solid rgba(148,163,184,0.22)",
+                    borderRadius: 18,
+                    background: "rgba(255,255,255,0.86)",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      color: "var(--mc-primary)",
+                    }}
+                  >
+                    {item.icon}
+                    <strong style={{ fontSize: 25 }}>{item.value}</strong>
+                  </div>
 
-              <div className="mc-list-item" style={{ background: "white" }}>
-                <strong>Episoade</strong>
-                <span>{episodes.length}</span>
-              </div>
-
-              <div className="mc-list-item" style={{ background: "white" }}>
-                <strong>Programări</strong>
-                <span>{totalAppointments}</span>
-              </div>
+                  <div
+                    style={{
+                      marginTop: 9,
+                      color: "var(--mc-muted)",
+                      fontSize: 13,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {item.label}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
-        </CardContent>
-      </Card>
+
+          {patient ? (
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                flexWrap: "wrap",
+                marginTop: 24,
+                paddingTop: 20,
+                borderTop: "1px solid rgba(148,163,184,0.22)",
+              }}
+            >
+              <span className="mc-pill mc-pill-neutral">
+                <CalendarDays size={14} />
+                {formatDate(patient.birth_date)}
+              </span>
+
+              {patient.phone ? (
+                <span className="mc-pill mc-pill-neutral">
+                  <Phone size={14} />
+                  {patient.phone}
+                </span>
+              ) : null}
+
+              {patient.email ? (
+                <span className="mc-pill mc-pill-neutral">
+                  <Mail size={14} />
+                  {patient.email}
+                </span>
+              ) : null}
+
+              {address ? (
+                <span className="mc-pill mc-pill-neutral">
+                  <MapPin size={14} />
+                  {address}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </section>
 
       {loading ? (
-        <p className="mc-empty-note">Se încarcă Journey-ul...</p>
+        <Card>
+          <CardContent style={{ padding: 24 }}>
+            <p className="mc-empty-note">Se încarcă parcursul pacientului...</p>
+          </CardContent>
+        </Card>
       ) : null}
 
       {error ? <p className="mc-error-banner">{error}</p> : null}
 
-      {!loading && !error && patient ? (
-        <>
-          <section className="mc-stats-grid">
-            <Card className="mc-stat-card">
-              <div className="mc-stat-top">
-                <div>
-                  <p className="mc-stat-label">Episoade</p>
-                  <p className="mc-stat-value">{episodes.length}</p>
-                </div>
-                <div className="mc-icon-badge">
-                  <Activity size={20} />
-                </div>
+      {!loading && !error && groupedJourney.length === 0 ? (
+        <Card>
+          <CardContent
+            style={{
+              padding: 40,
+              textAlign: "center",
+            }}
+          >
+            <Activity
+              size={34}
+              color="var(--mc-muted)"
+              style={{ marginBottom: 12 }}
+            />
+
+            <h2 style={{ margin: 0 }}>Nu există încă episoade</h2>
+
+            <p
+              className="mc-empty-note"
+              style={{
+                marginTop: 10,
+              }}
+            >
+              Episoadele medicale ale pacientului vor apărea aici în ordine
+              cronologică.
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {!loading && !error && groupedJourney.length > 0 ? (
+        <section
+          style={{
+            display: "grid",
+            gap: 30,
+          }}
+        >
+          {Object.entries(groupedByYear).map(([year, yearGroups]) => (
+            <div key={year}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  marginBottom: 16,
+                }}
+              >
+                <strong
+                  style={{
+                    fontSize: 22,
+                    letterSpacing: "-0.02em",
+                  }}
+                >
+                  {year}
+                </strong>
+
+                <div
+                  style={{
+                    height: 1,
+                    flex: 1,
+                    background: "var(--mc-border)",
+                  }}
+                />
               </div>
-              <p className="mc-stat-note">Istoricul medical disponibil.</p>
-            </Card>
 
-            <Card className="mc-stat-card">
-              <div className="mc-stat-top">
-                <div>
-                  <p className="mc-stat-label">Programări</p>
-                  <p className="mc-stat-value">{totalAppointments}</p>
-                </div>
-                <div className="mc-icon-badge">
-                  <CalendarDays size={20} />
-                </div>
-              </div>
-              <p className="mc-stat-note">Programări legate de episoade.</p>
-            </Card>
+              <div
+                style={{
+                  position: "relative",
+                  display: "grid",
+                  gap: 18,
+                  paddingLeft: 30,
+                }}
+              >
+                <div
+                  aria-hidden="true"
+                  style={{
+                    position: "absolute",
+                    left: 8,
+                    top: 16,
+                    bottom: 16,
+                    width: 2,
+                    borderRadius: 999,
+                    background:
+                      "linear-gradient(180deg, var(--mc-primary), rgba(148,163,184,0.28))",
+                  }}
+                />
 
-            <Card className="mc-stat-card">
-              <div className="mc-stat-top">
-                <div>
-                  <p className="mc-stat-label">Trimiteri</p>
-                  <p className="mc-stat-value">{totalReferrals}</p>
-                </div>
-                <div className="mc-icon-badge">
-                  <GitBranch size={20} />
-                </div>
-              </div>
-              <p className="mc-stat-note">Relații între furnizori medicali.</p>
-            </Card>
+                {yearGroups.map((group) => {
+                  const episode = group.episode;
+                  const episodeId = episode.id;
 
-            <Card className="mc-stat-card">
-              <div className="mc-stat-top">
-                <div>
-                  <p className="mc-stat-label">PDF-uri</p>
-                  <p className="mc-stat-value">{totalDocuments}</p>
-                </div>
-                <div className="mc-icon-badge">
-                  <Paperclip size={20} />
-                </div>
-              </div>
-              <p className="mc-stat-note">Fișiere atașate episoadelor.</p>
-            </Card>
-          </section>
+                  const expanded = expandedEpisodeIds[episodeId] ?? false;
 
-          <section className="mc-dashboard-grid">
-            <Card>
-              <CardHeader>
-                <CardTitle>Rezumat pacient</CardTitle>
-                <CardDescription>
-                  Date de identificare și contact pentru orientare rapidă.
-                </CardDescription>
-              </CardHeader>
+                  const uploadOpen = openUploadEpisodeId === episodeId;
 
-              <CardContent>
-                <div className="mc-status-row">
-                  <div className="mc-status-item">
-                    <div className="mc-status-text">
-                      <strong>Nume</strong>
-                      <span>{fullName || "Nespecificat"}</span>
-                    </div>
-                    <User size={16} color="var(--mc-muted)" />
-                  </div>
+                  const editing = editingEpisodeId === episodeId;
 
-                  <div className="mc-status-item">
-                    <div className="mc-status-text">
-                      <strong>Data nașterii</strong>
-                      <span>{formatDate(patient.birth_date)}</span>
-                    </div>
-                  </div>
+                  const saving = savingEpisodeTitleId === episodeId;
 
-                  <div className="mc-status-item">
-                    <div className="mc-status-text">
-                      <strong>Email</strong>
-                      <span>{patient.email || "Nedisponibil"}</span>
-                    </div>
-                  </div>
+                  const uploading = uploadingEpisodeId === episodeId;
 
-                  <div className="mc-status-item">
-                    <div className="mc-status-text">
-                      <strong>Telefon</strong>
-                      <span>{patient.phone || "Nedisponibil"}</span>
-                    </div>
-                  </div>
+                  const title = episodeFallbackTitle(episode);
 
-                  <div className="mc-status-item">
-                    <div className="mc-status-text">
-                      <strong>Adresă</strong>
-                      <span>{address || "Nespecificată"}</span>
-                    </div>
-                    <MapPin size={16} color="var(--mc-muted)" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                  const titleDraft = episodeTitleDraftById[episodeId] ?? title;
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Structură Journey</CardTitle>
-                <CardDescription>
-                  Organizare pe episoade, programări, trimiteri și PDF-uri.
-                </CardDescription>
-              </CardHeader>
+                  const selectedFile = uploadFileByEpisode[episodeId] ?? null;
 
-              <CardContent>
-                <div className="mc-status-row">
-                  <div className="mc-status-item">
-                    <div className="mc-status-text">
-                      <strong>Episoade</strong>
-                      <span>
-                        Fiecare card reprezintă o problemă, intervenție sau
-                        etapă medicală separată.
-                      </span>
-                    </div>
-                  </div>
+                  const uploadTitle = uploadTitleByEpisode[episodeId] ?? "";
 
-                  <div className="mc-status-item">
-                    <div className="mc-status-text">
-                      <strong>Titlu episod</strong>
-                      <span>
-                        Titlul poate fi stabilit de echipa medicală, de exemplu
-                        Colecistectomie, Control cardiologic sau Recuperare
-                        postoperatorie.
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="mc-status-item">
-                    <div className="mc-status-text">
-                      <strong>Documente PDF</strong>
-                      <span>
-                        Fișierele sunt încărcate separat din timeline-ul
-                        episodului.
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </section>
-
-          {groupedJourney.length === 0 ? (
-            <Card>
-              <CardContent>
-                <p className="mc-empty-note">
-                  Nu există încă episoade pentru acest pacient.
-                </p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div style={{ display: "grid", gap: 18 }}>
-              {groupedJourney.map((group) => {
-                const episode = group.episode;
-                const episodeTitle = episode.title || `Episod #${episode.id}`;
-                const selectedFile = uploadFileByEpisode[episode.id] ?? null;
-                const uploadTitle = uploadTitleByEpisode[episode.id] ?? "";
-                const isUploading = uploadingEpisodeId === episode.id;
-                const isEditingTitle = editingEpisodeId === episode.id;
-                const titleDraft =
-                  episodeTitleDraftById[episode.id] ?? episodeTitle;
-                const isSavingTitle = savingEpisodeTitleId === episode.id;
-
-                return (
-                  <Card key={episode.id}>
-                    <CardHeader>
-                      <CardTitle
+                  return (
+                    <article
+                      key={episodeId}
+                      style={{
+                        position: "relative",
+                      }}
+                    >
+                      <div
+                        aria-hidden="true"
                         style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          gap: 12,
-                          flexWrap: "wrap",
-                          alignItems: "flex-start",
+                          position: "absolute",
+                          left: -29,
+                          top: 26,
+                          width: 16,
+                          height: 16,
+                          border: "4px solid white",
+                          borderRadius: 999,
+                          background: "var(--mc-primary)",
+                          boxShadow: "0 0 0 1px rgba(37,99,235,0.22)",
+                        }}
+                      />
+
+                      <Card
+                        style={{
+                          overflow: "hidden",
+                          borderRadius: 22,
                         }}
                       >
-                        <div style={{ flex: 1, minWidth: 260 }}>
-                          {isEditingTitle ? (
-                            <div style={{ display: "grid", gap: 10 }}>
-                              <Input
-                                id={`episode-title-${episode.id}`}
-                                label="Titlu episod"
-                                value={titleDraft}
-                                onChange={(e) =>
-                                  setEpisodeTitleDraftById((prev) => ({
-                                    ...prev,
-                                    [episode.id]: e.target.value,
-                                  }))
-                                }
-                                placeholder="Ex: Colecistectomie, Control cardiologic"
-                              />
-
-                              <div
-                                style={{
-                                  display: "flex",
-                                  gap: 8,
-                                  flexWrap: "wrap",
-                                }}
-                              >
-                                <Button
-                                  onClick={() =>
-                                    handleSaveEpisodeTitle(episode.id)
-                                  }
-                                  disabled={isSavingTitle}
-                                >
-                                  <span
-                                    style={{
-                                      display: "inline-flex",
-                                      alignItems: "center",
-                                      gap: 8,
-                                    }}
-                                  >
-                                    <Save size={16} />
-                                    {isSavingTitle
-                                      ? "Se salvează..."
-                                      : "Salvează titlul"}
-                                  </span>
-                                </Button>
-
-                                <Button
-                                  variant="ghost"
-                                  onClick={cancelEditingEpisodeTitle}
-                                  disabled={isSavingTitle}
-                                >
-                                  <span
-                                    style={{
-                                      display: "inline-flex",
-                                      alignItems: "center",
-                                      gap: 8,
-                                    }}
-                                  >
-                                    <X size={16} />
-                                    Anulează
-                                  </span>
-                                </Button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div>
-                              <span>{episodeTitle}</span>
-
-                              <div
-                                style={{
-                                  marginTop: 8,
-                                  color: "var(--mc-muted)",
-                                  fontSize: 14,
-                                  fontWeight: 500,
-                                  lineHeight: 1.5,
-                                }}
-                              >
-                                {episode.owner_provider_name ||
-                                  `Furnizor #${episode.owner_provider_id}`}{" "}
-                                • Creat la {formatDateTime(episode.created_at)}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
                         <div
                           style={{
                             display: "flex",
-                            gap: 8,
-                            flexWrap: "wrap",
-                            alignItems: "center",
+                            alignItems: "flex-start",
+                            justifyContent: "space-between",
+                            gap: 18,
+                            padding: 22,
+                            cursor: "pointer",
                           }}
+                          onClick={() => toggleEpisode(episodeId)}
                         >
-                          <span className={statusClass(episode.status)}>
-                            {statusLabel(episode.status)}
-                          </span>
-
-                          {canEditEpisodeTitle && !isEditingTitle ? (
-                            <Button
-                              variant="ghost"
-                              onClick={() => startEditingEpisodeTitle(episode)}
-                            >
-                              <span
-                                style={{
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: 8,
-                                }}
-                              >
-                                <Pencil size={16} />
-                                Editează titlul
-                              </span>
-                            </Button>
-                          ) : null}
-                        </div>
-                      </CardTitle>
-
-                      {!isEditingTitle ? (
-                        <CardDescription>
-                          Titlul episodului descrie problema, intervenția sau
-                          motivul medical principal.
-                        </CardDescription>
-                      ) : null}
-                    </CardHeader>
-
-                    <CardContent>
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: 12,
-                          flexWrap: "wrap",
-                          marginBottom: 16,
-                        }}
-                      >
-                        <Link href={`/episodes/${episode.id}`}>
-                          <Button>
-                            <span
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: 8,
-                              }}
-                            >
-                              <FileText size={16} />
-                              Deschide episodul
-                            </span>
-                          </Button>
-                        </Link>
-                      </div>
-
-                      {canUploadDocuments ? (
-                        <div
-                          className="mc-upload-zone"
-                          style={{ marginBottom: 18 }}
-                        >
-                          <Input
-                            id={`journey-document-title-${episode.id}`}
-                            label="Titlu document (opțional)"
-                            value={uploadTitle}
-                            onChange={(e) =>
-                              setUploadTitleByEpisode((prev) => ({
-                                ...prev,
-                                [episode.id]: e.target.value,
-                              }))
-                            }
-                            placeholder="Ex: rezultat PDF, bilet, recomandare"
-                          />
-
-                          <div>
-                            <label
-                              className="mc-label"
-                              htmlFor={`journey-document-file-${episode.id}`}
-                            >
-                              Fișier PDF
-                            </label>
-                            <input
-                              id={`journey-document-file-${episode.id}`}
-                              type="file"
-                              className="mc-input"
-                              accept=".pdf"
-                              onChange={(e) =>
-                                setUploadFileByEpisode((prev) => ({
-                                  ...prev,
-                                  [episode.id]: e.target.files?.[0] || null,
-                                }))
-                              }
-                            />
-                          </div>
-
-                          <div className="mc-muted-block">
-                            <div>
-                              <strong>Fișier selectat:</strong>{" "}
-                              {selectedFile?.name || "Niciun fișier"}
-                            </div>
-                            <div>
-                              Documentul va fi atașat acestui episod ca fișier
-                              PDF.
-                            </div>
-                          </div>
-
-                          <Button
-                            onClick={() => handleUploadDocument(episode.id)}
-                            disabled={isUploading || !selectedFile}
-                          >
-                            <span
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: 8,
-                              }}
-                            >
-                              <Upload size={16} />
-                              {isUploading
-                                ? "Se încarcă..."
-                                : "Încarcă documentul"}
-                            </span>
-                          </Button>
-                        </div>
-                      ) : null}
-
-                      <div style={{ display: "grid", gap: 14 }}>
-                        <div>
-                          <h3
+                          <div
                             style={{
-                              margin: "0 0 10px",
-                              fontSize: 18,
-                              lineHeight: 1.2,
+                              display: "flex",
+                              gap: 14,
+                              minWidth: 0,
+                              flex: 1,
                             }}
                           >
-                            Programări
-                          </h3>
-
-                          {group.appointments.length === 0 ? (
-                            <p className="mc-empty-note">
-                              Nu există programări legate de acest episod.
-                            </p>
-                          ) : (
-                            <div className="mc-list">
-                              {group.appointments.map((appointment) => {
-                                const docs =
-                                  group.documentsByAppointment[
-                                    appointment.id
-                                  ] ?? [];
-
-                                return (
-                                  <div
-                                    key={appointment.id}
-                                    className="mc-list-item"
-                                  >
-                                    <div
-                                      style={{
-                                        display: "flex",
-                                        justifyContent: "space-between",
-                                        gap: 12,
-                                        flexWrap: "wrap",
-                                      }}
-                                    >
-                                      <div>
-                                        <strong>
-                                          {appointmentTitle(appointment)}
-                                        </strong>
-                                        <span>
-                                          {appointmentSubtitle(appointment)}
-                                        </span>
-                                        <span>
-                                          {formatDateTime(
-                                            appointment.start_time,
-                                          )}
-                                        </span>
-                                      </div>
-
-                                      <span
-                                        className={statusClass(
-                                          appointment.status,
-                                        )}
-                                      >
-                                        {statusLabel(appointment.status)}
-                                      </span>
-                                    </div>
-
-                                    <div style={{ marginTop: 10 }}>
-                                      <Link
-                                        href={`/appointments/${appointment.id}`}
-                                      >
-                                        <Button variant="secondary">
-                                          Deschide programarea
-                                        </Button>
-                                      </Link>
-                                    </div>
-
-                                    {docs.length > 0 ? (
-                                      <div
-                                        style={{
-                                          marginTop: 12,
-                                          display: "grid",
-                                          gap: 8,
-                                        }}
-                                      >
-                                        <strong>Documente atașate</strong>
-
-                                        {sortDesc(docs).map((doc) => (
-                                          <div
-                                            key={doc.id}
-                                            className="mc-muted-block"
-                                          >
-                                            <div>
-                                              <strong>
-                                                {documentTitle(doc)}
-                                              </strong>
-                                            </div>
-                                            <div>
-                                              {formatDateTime(doc.created_at)}
-                                            </div>
-                                            <div>
-                                              <Link
-                                                href={`/documents/${doc.id}`}
-                                              >
-                                                <Button variant="secondary">
-                                                  Vezi documentul
-                                                </Button>
-                                              </Link>
-                                            </div>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    ) : null}
-                                  </div>
-                                );
-                              })}
+                            <div
+                              style={{
+                                display: "grid",
+                                placeItems: "center",
+                                width: 44,
+                                height: 44,
+                                flexShrink: 0,
+                                borderRadius: 14,
+                                color: "var(--mc-primary)",
+                                background: "rgba(37,99,235,0.10)",
+                              }}
+                            >
+                              <Activity size={21} />
                             </div>
-                          )}
-                        </div>
 
-                        <div>
-                          <h3
-                            style={{
-                              margin: "8px 0 10px",
-                              fontSize: 18,
-                              lineHeight: 1.2,
-                            }}
-                          >
-                            Trimiteri
-                          </h3>
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              {editing ? (
+                                <div
+                                  style={{
+                                    display: "grid",
+                                    gap: 10,
+                                  }}
+                                  onClick={(event) => event.stopPropagation()}
+                                >
+                                  <Input
+                                    id={`episode-title-${episodeId}`}
+                                    label="Titlul episodului"
+                                    value={titleDraft}
+                                    onChange={(event) =>
+                                      setEpisodeTitleDraftById((previous) => ({
+                                        ...previous,
+                                        [episodeId]: event.target.value,
+                                      }))
+                                    }
+                                    placeholder="Ex: Control cardiologic"
+                                  />
 
-                          {group.referrals.length === 0 ? (
-                            <p className="mc-empty-note">
-                              Nu există trimiteri legate de acest episod.
-                            </p>
-                          ) : (
-                            <div className="mc-list">
-                              {group.referrals.map((referral) => (
-                                <div key={referral.id} className="mc-list-item">
                                   <div
                                     style={{
                                       display: "flex",
-                                      justifyContent: "space-between",
-                                      gap: 12,
+                                      gap: 8,
                                       flexWrap: "wrap",
                                     }}
                                   >
-                                    <div>
-                                      <strong>{referralTitle(referral)}</strong>
-                                      <span>
-                                        {referral.reason ||
-                                          "Fără motiv specificat"}
-                                      </span>
-                                      <span>
-                                        {formatDateTime(referral.created_at)}
-                                      </span>
-                                    </div>
-
-                                    <span
-                                      className={statusClass(referral.status)}
+                                    <Button
+                                      onClick={() =>
+                                        handleSaveEpisodeTitle(episodeId)
+                                      }
+                                      disabled={saving}
                                     >
-                                      {statusLabel(referral.status)}
+                                      <Save size={16} />
+                                      {saving ? "Se salvează..." : "Salvează"}
+                                    </Button>
+
+                                    <Button
+                                      variant="ghost"
+                                      onClick={cancelEditingEpisodeTitle}
+                                      disabled={saving}
+                                    >
+                                      <X size={16} />
+                                      Anulează
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <>
+                                  <h2
+                                    style={{
+                                      margin: 0,
+                                      fontSize: 21,
+                                      lineHeight: 1.25,
+                                      letterSpacing: "-0.02em",
+                                    }}
+                                  >
+                                    {title}
+                                  </h2>
+
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      gap: 8,
+                                      flexWrap: "wrap",
+                                      marginTop: 8,
+                                      color: "var(--mc-muted)",
+                                      fontSize: 14,
+                                    }}
+                                  >
+                                    <span>
+                                      {episode.owner_provider_name ||
+                                        "Furnizor medical"}
+                                    </span>
+
+                                    <span>•</span>
+
+                                    <span>
+                                      {formatDate(episode.created_at)}
                                     </span>
                                   </div>
-                                </div>
-                              ))}
+
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      gap: 8,
+                                      flexWrap: "wrap",
+                                      marginTop: 13,
+                                    }}
+                                  >
+                                    <span
+                                      className={statusClass(episode.status)}
+                                    >
+                                      {statusLabel(episode.status)}
+                                    </span>
+
+                                    <span className="mc-pill mc-pill-neutral">
+                                      {group.appointments.length} programări
+                                    </span>
+
+                                    <span className="mc-pill mc-pill-neutral">
+                                      {group.documentCount} documente
+                                    </span>
+
+                                    <span className="mc-pill mc-pill-neutral">
+                                      {group.referrals.length} trimiteri
+                                    </span>
+                                  </div>
+                                </>
+                              )}
                             </div>
-                          )}
+                          </div>
+
+                          {!editing ? (
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: 8,
+                                alignItems: "center",
+                                flexShrink: 0,
+                              }}
+                            >
+                              {canEditEpisodeTitle ? (
+                                <Button
+                                  variant="ghost"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    startEditingEpisodeTitle(episode);
+                                  }}
+                                >
+                                  <Pencil size={16} />
+                                </Button>
+                              ) : null}
+
+                              <div
+                                style={{
+                                  display: "grid",
+                                  placeItems: "center",
+                                  width: 36,
+                                  height: 36,
+                                }}
+                              >
+                                {expanded ? (
+                                  <ChevronDown size={21} />
+                                ) : (
+                                  <ChevronRight size={21} />
+                                )}
+                              </div>
+                            </div>
+                          ) : null}
                         </div>
 
-                        <div>
-                          <h3
+                        {expanded ? (
+                          <CardContent
                             style={{
-                              margin: "8px 0 10px",
-                              fontSize: 18,
-                              lineHeight: 1.2,
+                              padding: "0 22px 24px",
                             }}
                           >
-                            PDF-uri atașate episodului
-                          </h3>
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: 10,
+                                flexWrap: "wrap",
+                                paddingTop: 18,
+                                borderTop: "1px solid var(--mc-border)",
+                              }}
+                            >
+                              <Link href={`/episodes/${episodeId}`}>
+                                <Button>
+                                  <FileText size={16} />
+                                  Deschide episodul
+                                </Button>
+                              </Link>
 
-                          {group.episodeDocuments.length === 0 ? (
-                            <p className="mc-empty-note">
-                              Nu există PDF-uri atașate direct acestui episod.
-                            </p>
-                          ) : (
-                            <div className="mc-list">
-                              {group.episodeDocuments.map((doc) => (
-                                <div key={doc.id} className="mc-list-item">
-                                  <strong>{documentTitle(doc)}</strong>
-                                  <span>{formatDateTime(doc.created_at)}</span>
-
-                                  <div style={{ marginTop: 8 }}>
-                                    <Link href={`/documents/${doc.id}`}>
-                                      <Button variant="secondary">
-                                        Vezi documentul
-                                      </Button>
-                                    </Link>
-                                  </div>
-                                </div>
-                              ))}
+                              {canUploadDocuments ? (
+                                <Button
+                                  variant="secondary"
+                                  onClick={() =>
+                                    setOpenUploadEpisodeId(
+                                      uploadOpen ? null : episodeId,
+                                    )
+                                  }
+                                >
+                                  <Plus size={16} />
+                                  Adaugă document
+                                </Button>
+                              ) : null}
                             </div>
-                          )}
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
+
+                            {uploadOpen && canUploadDocuments ? (
+                              <div
+                                className="mc-upload-zone"
+                                style={{
+                                  marginTop: 18,
+                                  display: "grid",
+                                  gap: 14,
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    gap: 12,
+                                    alignItems: "center",
+                                  }}
+                                >
+                                  <div>
+                                    <strong>Document nou</strong>
+
+                                    <div
+                                      style={{
+                                        marginTop: 4,
+                                        color: "var(--mc-muted)",
+                                        fontSize: 14,
+                                      }}
+                                    >
+                                      Atașează un fișier PDF acestui episod.
+                                    </div>
+                                  </div>
+
+                                  <Button
+                                    variant="ghost"
+                                    onClick={() => setOpenUploadEpisodeId(null)}
+                                  >
+                                    <X size={16} />
+                                  </Button>
+                                </div>
+
+                                <Input
+                                  id={`journey-document-title-${episodeId}`}
+                                  label="Titlu document (opțional)"
+                                  value={uploadTitle}
+                                  onChange={(event) =>
+                                    setUploadTitleByEpisode((previous) => ({
+                                      ...previous,
+                                      [episodeId]: event.target.value,
+                                    }))
+                                  }
+                                  placeholder="Ex: Analize, rezultat RMN"
+                                />
+
+                                <div>
+                                  <label
+                                    className="mc-label"
+                                    htmlFor={`journey-document-file-${episodeId}`}
+                                  >
+                                    Fișier PDF
+                                  </label>
+
+                                  <input
+                                    id={`journey-document-file-${episodeId}`}
+                                    type="file"
+                                    className="mc-input"
+                                    accept=".pdf,application/pdf"
+                                    onChange={(event) =>
+                                      setUploadFileByEpisode((previous) => ({
+                                        ...previous,
+                                        [episodeId]:
+                                          event.target.files?.[0] || null,
+                                      }))
+                                    }
+                                  />
+                                </div>
+
+                                {selectedFile ? (
+                                  <div className="mc-muted-block">
+                                    <strong>Fișier selectat:</strong>{" "}
+                                    {selectedFile.name}
+                                  </div>
+                                ) : null}
+
+                                <Button
+                                  onClick={() =>
+                                    handleUploadDocument(episodeId)
+                                  }
+                                  disabled={uploading || !selectedFile}
+                                >
+                                  <Upload size={16} />
+                                  {uploading
+                                    ? "Se încarcă..."
+                                    : "Încarcă documentul"}
+                                </Button>
+                              </div>
+                            ) : null}
+
+                            <div
+                              style={{
+                                display: "grid",
+                                gap: 24,
+                                marginTop: 24,
+                              }}
+                            >
+                              <section>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 9,
+                                    marginBottom: 12,
+                                  }}
+                                >
+                                  <CalendarDays
+                                    size={18}
+                                    color="var(--mc-primary)"
+                                  />
+                                  <h3
+                                    style={{
+                                      margin: 0,
+                                      fontSize: 18,
+                                    }}
+                                  >
+                                    Programări
+                                  </h3>
+                                </div>
+
+                                {group.appointments.length === 0 ? (
+                                  <p className="mc-empty-note">
+                                    Nu există programări asociate.
+                                  </p>
+                                ) : (
+                                  <div
+                                    style={{
+                                      display: "grid",
+                                      gap: 10,
+                                    }}
+                                  >
+                                    {group.appointments.map((appointment) => {
+                                      const documents =
+                                        group.documentsByAppointment[
+                                          appointment.id
+                                        ] ?? [];
+
+                                      return (
+                                        <div
+                                          key={appointment.id}
+                                          style={{
+                                            display: "grid",
+                                            gridTemplateColumns:
+                                              "72px minmax(0, 1fr) auto",
+                                            gap: 14,
+                                            alignItems: "center",
+                                            padding: 15,
+                                            border:
+                                              "1px solid var(--mc-border)",
+                                            borderRadius: 16,
+                                            background: "rgba(248,250,252,0.7)",
+                                          }}
+                                        >
+                                          <div
+                                            style={{
+                                              fontSize: 18,
+                                              fontWeight: 800,
+                                              color: "var(--mc-primary)",
+                                            }}
+                                          >
+                                            {formatTime(appointment.start_time)}
+                                          </div>
+
+                                          <div
+                                            style={{
+                                              minWidth: 0,
+                                            }}
+                                          >
+                                            <strong
+                                              style={{
+                                                display: "block",
+                                              }}
+                                            >
+                                              {appointmentTitle(appointment)}
+                                            </strong>
+
+                                            <span
+                                              style={{
+                                                display: "block",
+                                                marginTop: 4,
+                                                color: "var(--mc-muted)",
+                                                fontSize: 14,
+                                              }}
+                                            >
+                                              {appointmentSubtitle(appointment)}
+                                            </span>
+
+                                            <span
+                                              style={{
+                                                display: "block",
+                                                marginTop: 3,
+                                                color: "var(--mc-muted)",
+                                                fontSize: 13,
+                                              }}
+                                            >
+                                              {formatDate(
+                                                appointment.start_time,
+                                              )}
+                                              {documents.length > 0
+                                                ? ` • ${documents.length} documente`
+                                                : ""}
+                                            </span>
+                                          </div>
+
+                                          <div
+                                            style={{
+                                              display: "flex",
+                                              gap: 8,
+                                              alignItems: "center",
+                                              flexWrap: "wrap",
+                                              justifyContent: "flex-end",
+                                            }}
+                                          >
+                                            <span
+                                              className={statusClass(
+                                                appointment.status,
+                                              )}
+                                            >
+                                              {statusLabel(appointment.status)}
+                                            </span>
+
+                                            <Link
+                                              href={`/appointments/${appointment.id}`}
+                                            >
+                                              <Button variant="secondary">
+                                                Deschide
+                                              </Button>
+                                            </Link>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </section>
+
+                              <section>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 9,
+                                    marginBottom: 12,
+                                  }}
+                                >
+                                  <Paperclip
+                                    size={18}
+                                    color="var(--mc-primary)"
+                                  />
+
+                                  <h3
+                                    style={{
+                                      margin: 0,
+                                      fontSize: 18,
+                                    }}
+                                  >
+                                    Documente
+                                  </h3>
+                                </div>
+
+                                {group.episodeDocuments.length === 0 ? (
+                                  <p className="mc-empty-note">
+                                    Nu există documente atașate direct
+                                    episodului.
+                                  </p>
+                                ) : (
+                                  <div
+                                    style={{
+                                      display: "grid",
+                                      gridTemplateColumns:
+                                        "repeat(auto-fit, minmax(240px, 1fr))",
+                                      gap: 10,
+                                    }}
+                                  >
+                                    {group.episodeDocuments.map((document) => (
+                                      <Link
+                                        key={document.id}
+                                        href={`/documents/${document.id}`}
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "center",
+                                          gap: 12,
+                                          padding: 14,
+                                          border: "1px solid var(--mc-border)",
+                                          borderRadius: 16,
+                                          color: "inherit",
+                                          textDecoration: "none",
+                                          background: "white",
+                                        }}
+                                      >
+                                        <div
+                                          style={{
+                                            display: "grid",
+                                            placeItems: "center",
+                                            width: 40,
+                                            height: 40,
+                                            flexShrink: 0,
+                                            borderRadius: 12,
+                                            color: "var(--mc-primary)",
+                                            background: "rgba(37,99,235,0.10)",
+                                          }}
+                                        >
+                                          <FileText size={19} />
+                                        </div>
+
+                                        <div
+                                          style={{
+                                            minWidth: 0,
+                                            flex: 1,
+                                          }}
+                                        >
+                                          <strong
+                                            style={{
+                                              display: "block",
+                                              overflow: "hidden",
+                                              textOverflow: "ellipsis",
+                                              whiteSpace: "nowrap",
+                                            }}
+                                          >
+                                            {documentTitle(document)}
+                                          </strong>
+
+                                          <span
+                                            style={{
+                                              display: "block",
+                                              marginTop: 4,
+                                              color: "var(--mc-muted)",
+                                              fontSize: 13,
+                                            }}
+                                          >
+                                            {formatDateTime(
+                                              document.created_at,
+                                            )}
+                                          </span>
+                                        </div>
+
+                                        <ChevronRight
+                                          size={18}
+                                          color="var(--mc-muted)"
+                                        />
+                                      </Link>
+                                    ))}
+                                  </div>
+                                )}
+                              </section>
+
+                              <section>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 9,
+                                    marginBottom: 12,
+                                  }}
+                                >
+                                  <GitBranch
+                                    size={18}
+                                    color="var(--mc-primary)"
+                                  />
+
+                                  <h3
+                                    style={{
+                                      margin: 0,
+                                      fontSize: 18,
+                                    }}
+                                  >
+                                    Trimiteri
+                                  </h3>
+                                </div>
+
+                                {group.referrals.length === 0 ? (
+                                  <p className="mc-empty-note">
+                                    Nu există trimiteri asociate.
+                                  </p>
+                                ) : (
+                                  <div
+                                    style={{
+                                      display: "grid",
+                                      gap: 10,
+                                    }}
+                                  >
+                                    {group.referrals.map((referral) => (
+                                      <div
+                                        key={referral.id}
+                                        style={{
+                                          display: "flex",
+                                          justifyContent: "space-between",
+                                          gap: 16,
+                                          flexWrap: "wrap",
+                                          padding: 15,
+                                          border: "1px solid var(--mc-border)",
+                                          borderRadius: 16,
+                                        }}
+                                      >
+                                        <div
+                                          style={{
+                                            display: "flex",
+                                            gap: 12,
+                                          }}
+                                        >
+                                          <CircleDot
+                                            size={18}
+                                            color="var(--mc-primary)"
+                                            style={{
+                                              marginTop: 2,
+                                            }}
+                                          />
+
+                                          <div>
+                                            <strong>
+                                              {referralTitle(referral)}
+                                            </strong>
+
+                                            <div
+                                              style={{
+                                                marginTop: 5,
+                                                color: "var(--mc-muted)",
+                                                fontSize: 14,
+                                              }}
+                                            >
+                                              {referral.reason ||
+                                                "Fără motiv specificat"}
+                                            </div>
+
+                                            <div
+                                              style={{
+                                                marginTop: 4,
+                                                color: "var(--mc-muted)",
+                                                fontSize: 13,
+                                              }}
+                                            >
+                                              {formatDateTime(
+                                                referral.created_at,
+                                              )}
+                                            </div>
+                                          </div>
+                                        </div>
+
+                                        <span
+                                          className={statusClass(
+                                            referral.status,
+                                          )}
+                                        >
+                                          {statusLabel(referral.status)}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </section>
+                            </div>
+                          </CardContent>
+                        ) : null}
+                      </Card>
+                    </article>
+                  );
+                })}
+              </div>
             </div>
-          )}
-        </>
+          ))}
+        </section>
       ) : null}
     </div>
   );
